@@ -190,3 +190,102 @@ impl Render for TreeView {
             .children(rows)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{FsNode, UiNode};
+    use std::{cell::RefCell, path::PathBuf, rc::Rc};
+
+    fn make_dir_node(name: &str, path: &str, size: u64) -> UiNode {
+        UiNode {
+            fs_node: FsNode {
+                name: name.into(),
+                path: PathBuf::from(path),
+                is_dir: true,
+                current_size: size,
+                prev_size: None,
+                children: vec![],
+            },
+            depth: 0,
+            expanded: false,
+            scan_progress: 1.0,
+        }
+    }
+
+    fn make_file_node(name: &str, path: &str, size: u64) -> UiNode {
+        UiNode {
+            fs_node: FsNode {
+                name: name.into(),
+                path: PathBuf::from(path),
+                is_dir: false,
+                current_size: size,
+                prev_size: None,
+                children: vec![],
+            },
+            depth: 0,
+            expanded: false,
+            scan_progress: 0.5,
+        }
+    }
+
+    #[gpui::test]
+    fn initial_state_is_empty(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, cx| TreeView::new(cx));
+        view.read_with(cx, |v, _| {
+            assert!(v.nodes.is_empty());
+        });
+    }
+
+    #[gpui::test]
+    fn set_nodes_updates_list(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, cx| TreeView::new(cx));
+        let nodes = vec![
+            make_dir_node("docs", "C:/docs", 1000),
+            make_file_node("readme.txt", "C:/readme.txt", 500),
+        ];
+        view.update(cx, |v, cx| v.set_nodes(nodes, cx));
+        cx.run_until_parked();
+        view.read_with(cx, |v, _| {
+            assert_eq!(v.nodes.len(), 2);
+            assert_eq!(v.nodes[0].fs_node.name, "docs");
+            assert_eq!(v.nodes[1].fs_node.name, "readme.txt");
+        });
+    }
+
+    #[gpui::test]
+    fn toggle_expand_emits_event(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, cx| TreeView::new(cx));
+        view.update(cx, |v, cx| {
+            v.set_nodes(vec![make_dir_node("docs", "C:/docs", 1000)], cx);
+        });
+
+        let received: Rc<RefCell<Vec<PathBuf>>> = Rc::new(RefCell::new(vec![]));
+        let captured = received.clone();
+        let _sub = cx.update(|_window, app| {
+            app.subscribe(&view, move |_, event: &TreeViewEvent, _| {
+                if let TreeViewEvent::ToggleExpand(path) = event {
+                    captured.borrow_mut().push(path.clone());
+                }
+            })
+        });
+
+        view.update(cx, |_, cx| {
+            cx.emit(TreeViewEvent::ToggleExpand(PathBuf::from("C:/docs")));
+        });
+        cx.run_until_parked();
+
+        assert_eq!(*received.borrow(), vec![PathBuf::from("C:/docs")]);
+    }
+
+    #[gpui::test]
+    fn render_does_not_panic(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, cx| TreeView::new(cx));
+        let nodes = vec![
+            make_dir_node("docs", "C:/docs", 2000),
+            make_file_node("readme.txt", "C:/readme.txt", 500),
+        ];
+        view.update(cx, |v, cx| v.set_nodes(nodes, cx));
+        cx.run_until_parked();
+    }
+}

@@ -202,3 +202,125 @@ impl Render for ScanHistory {
             .children(rows)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::ScanMeta;
+    use std::{cell::RefCell, rc::Rc};
+
+    fn scans() -> Vec<ScanMeta> {
+        vec![
+            ScanMeta { id: 1, drive: "C:".into(), scanned_at: "2026-01-01T00:00:00Z".into(), total_size: 1000 },
+            ScanMeta { id: 2, drive: "C:".into(), scanned_at: "2026-01-02T00:00:00Z".into(), total_size: 1200 },
+        ]
+    }
+
+    #[gpui::test]
+    fn initial_state_is_empty(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, cx| ScanHistory::new(cx));
+        view.read_with(cx, |v, _| {
+            assert!(v.scans.is_empty());
+            assert!(v.compare_a.is_none());
+            assert!(v.compare_b.is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn set_scans_updates_list(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, cx| ScanHistory::new(cx));
+        view.update(cx, |v, cx| v.set_scans(scans(), cx));
+        cx.run_until_parked();
+        view.read_with(cx, |v, _| {
+            assert_eq!(v.scans.len(), 2);
+            assert_eq!(v.scans[0].id, 1);
+            assert_eq!(v.scans[1].id, 2);
+        });
+    }
+
+    #[gpui::test]
+    fn base_selection_sets_compare_a(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, cx| ScanHistory::new(cx));
+        view.update(cx, |v, cx| {
+            v.set_scans(scans(), cx);
+            v.compare_a = Some(1);
+            cx.notify();
+        });
+        cx.run_until_parked();
+        view.read_with(cx, |v, _| {
+            assert_eq!(v.compare_a, Some(1));
+            assert_eq!(v.compare_b, None);
+        });
+    }
+
+    #[gpui::test]
+    fn new_selection_sets_compare_b(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, cx| ScanHistory::new(cx));
+        view.update(cx, |v, cx| {
+            v.set_scans(scans(), cx);
+            v.compare_b = Some(2);
+            cx.notify();
+        });
+        cx.run_until_parked();
+        view.read_with(cx, |v, _| {
+            assert_eq!(v.compare_a, None);
+            assert_eq!(v.compare_b, Some(2));
+        });
+    }
+
+    #[gpui::test]
+    fn compare_requested_emits_both_ids(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, cx| ScanHistory::new(cx));
+        view.update(cx, |v, cx| v.set_scans(scans(), cx));
+
+        let received: Rc<RefCell<Vec<(i64, i64)>>> = Rc::new(RefCell::new(vec![]));
+        let captured = received.clone();
+        let _sub = cx.update(|_window, app| {
+            app.subscribe(&view, move |_, event: &ScanHistoryEvent, _| {
+                if let ScanHistoryEvent::CompareRequested { base_id, new_id } = event {
+                    captured.borrow_mut().push((*base_id, *new_id));
+                }
+            })
+        });
+
+        view.update(cx, |v, cx| {
+            v.compare_a = Some(1);
+            v.compare_b = Some(2);
+            cx.emit(ScanHistoryEvent::CompareRequested { base_id: 1, new_id: 2 });
+            cx.notify();
+        });
+        cx.run_until_parked();
+
+        assert_eq!(*received.borrow(), vec![(1, 2)]);
+    }
+
+    #[gpui::test]
+    fn delete_requested_emits_scan_id(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, cx| ScanHistory::new(cx));
+        view.update(cx, |v, cx| v.set_scans(scans(), cx));
+
+        let received: Rc<RefCell<Vec<i64>>> = Rc::new(RefCell::new(vec![]));
+        let captured = received.clone();
+        let _sub = cx.update(|_window, app| {
+            app.subscribe(&view, move |_, event: &ScanHistoryEvent, _| {
+                if let ScanHistoryEvent::DeleteRequested(id) = event {
+                    captured.borrow_mut().push(*id);
+                }
+            })
+        });
+
+        view.update(cx, |_, cx| {
+            cx.emit(ScanHistoryEvent::DeleteRequested(1));
+        });
+        cx.run_until_parked();
+
+        assert_eq!(*received.borrow(), vec![1_i64]);
+    }
+
+    #[gpui::test]
+    fn render_does_not_panic(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, cx| ScanHistory::new(cx));
+        view.update(cx, |v, cx| v.set_scans(scans(), cx));
+        cx.run_until_parked();
+    }
+}

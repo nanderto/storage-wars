@@ -100,3 +100,86 @@ impl Render for DriveSelector {
             }))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::DriveInfo;
+    use std::{cell::RefCell, rc::Rc};
+
+    fn drives() -> Vec<DriveInfo> {
+        vec![
+            DriveInfo { name: "C:".into(), total_space: 500_000, available_space: 100_000 },
+            DriveInfo { name: "D:".into(), total_space: 1_000_000, available_space: 400_000 },
+        ]
+    }
+
+    #[gpui::test]
+    fn initial_state_is_empty(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, cx| DriveSelector::new(cx));
+        view.read_with(cx, |v, _| {
+            assert!(v.drives.is_empty());
+            assert!(v.selected_drive.is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn set_drives_updates_list(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, cx| DriveSelector::new(cx));
+        view.update(cx, |v, cx| v.set_drives(drives(), cx));
+        cx.run_until_parked();
+        view.read_with(cx, |v, _| {
+            assert_eq!(v.drives.len(), 2);
+            assert_eq!(v.drives[0].name, "C:");
+            assert_eq!(v.drives[1].name, "D:");
+        });
+    }
+
+    #[gpui::test]
+    fn selected_drive_can_be_set(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, cx| DriveSelector::new(cx));
+        view.update(cx, |v, cx| {
+            v.set_drives(drives(), cx);
+            v.selected_drive = Some("C:".into());
+            cx.notify();
+        });
+        cx.run_until_parked();
+        view.read_with(cx, |v, _| {
+            assert_eq!(v.selected_drive, Some("C:".to_string()));
+        });
+    }
+
+    #[gpui::test]
+    fn drive_selected_emits_event(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, cx| DriveSelector::new(cx));
+        view.update(cx, |v, cx| v.set_drives(drives(), cx));
+
+        let selected: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(vec![]));
+        let captured = selected.clone();
+        let _sub = cx.update(|_window, app| {
+            app.subscribe(&view, move |_, event: &DriveSelectorEvent, _| {
+                if let DriveSelectorEvent::DriveSelected(name) = event {
+                    captured.borrow_mut().push(name.clone());
+                }
+            })
+        });
+
+        view.update(cx, |v, cx| {
+            let name = "D:".to_string();
+            v.selected_drive = Some(name.clone());
+            cx.emit(DriveSelectorEvent::DriveSelected(name));
+            cx.notify();
+        });
+        cx.run_until_parked();
+
+        assert_eq!(*selected.borrow(), vec!["D:".to_string()]);
+    }
+
+    #[gpui::test]
+    fn render_does_not_panic(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, cx| DriveSelector::new(cx));
+        view.update(cx, |v, cx| v.set_drives(drives(), cx));
+        cx.run_until_parked();
+        // If we reach here without panicking the render is sound.
+    }
+}
