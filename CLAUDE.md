@@ -53,6 +53,8 @@ Every set of changes must follow this workflow:
 
 Branch naming convention: `phase-1-data-layer`, `phase-2-scanner`, `phase-3-ui-components`, etc.
 
+**After every commit**, update `Tasks.md` to check off any items completed by that commit, then include the `Tasks.md` change in the same commit or as an immediate follow-up commit on the same branch.
+
 ## Implementation Plan
 
 See `Tasks.md` for the phased checklist. Phases must be completed and reviewed one at a time:
