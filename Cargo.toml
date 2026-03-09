@@ -4,8 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-gpui = { git = "https://github.com/zed-industries/zed", branch = "main" }
-gpui_platform = { git = "https://github.com/zed-industries/zed", branch = "main" }
+gpui = { git = "https://github.com/zed-industries/zed" }
+gpui_platform = { git = "https://github.com/zed-industries/zed" }
+gpui-component = { git = "https://github.com/longbridge/gpui-component", rev = "b6f284ce" }
 serde = { version = "1", features = ["derive"] }
 anyhow = "1"
 dirs = "5"
@@ -14,4 +15,4 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 
 [dev-dependencies]
 tempfile = "3"
-gpui = { git = "https://github.com/zed-industries/zed", branch = "main", features = ["test-support"] }
+gpui = { git = "https://github.com/zed-industries/zed", features = ["test-support"] }

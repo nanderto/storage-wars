@@ -13,6 +13,12 @@ pub struct FsNode {
     /// Populated only when comparing two scans.
     pub prev_size: Option<u64>,
     pub children: Vec<FsNode>,
+    /// Recursive count of files below this node (0 for file entries).
+    pub file_count: u64,
+    /// Recursive count of folders below this node (0 for file entries).
+    pub folder_count: u64,
+    /// ISO 8601 last-modified timestamp.
+    pub modified: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -105,6 +111,9 @@ pub struct DbNode {
     pub path: String,
     pub is_dir: bool,
     pub size: u64,
+    pub file_count: u64,
+    pub folder_count: u64,
+    pub modified: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -113,7 +122,8 @@ pub struct DbNode {
 
 #[derive(Clone, Debug)]
 pub struct DriveInfo {
-    pub name: String,       // e.g. "C:"
+    pub name: String,           // e.g. "C:"
+    pub volume_label: String,   // e.g. "OS" (from sysinfo Disk::name())
     pub total_space: u64,
     pub available_space: u64,
 }
@@ -141,6 +151,19 @@ pub fn format_size(bytes: u64) -> String {
     }
 }
 
+/// Format an integer with comma thousand-separators (e.g. 2_979_238 → "2,979,238").
+pub fn format_number(n: u64) -> String {
+    let s = n.to_string();
+    let mut result = String::with_capacity(s.len() + s.len() / 3);
+    for (i, ch) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
+            result.push(',');
+        }
+        result.push(ch);
+    }
+    result
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -157,6 +180,9 @@ mod tests {
             current_size,
             prev_size,
             children: vec![],
+            file_count: 0,
+            folder_count: 0,
+            modified: None,
         }
     }
 
@@ -248,5 +274,27 @@ mod tests {
     #[test]
     fn format_terabytes() {
         assert_eq!(format_size(1_099_511_627_776), "1.00 TB");
+    }
+
+    // --- format_number ---
+
+    #[test]
+    fn format_number_small() {
+        assert_eq!(format_number(0), "0");
+        assert_eq!(format_number(1), "1");
+        assert_eq!(format_number(999), "999");
+    }
+
+    #[test]
+    fn format_number_thousands() {
+        assert_eq!(format_number(1_000), "1,000");
+        assert_eq!(format_number(12_345), "12,345");
+        assert_eq!(format_number(999_999), "999,999");
+    }
+
+    #[test]
+    fn format_number_millions() {
+        assert_eq!(format_number(1_000_000), "1,000,000");
+        assert_eq!(format_number(2_979_238), "2,979,238");
     }
 }

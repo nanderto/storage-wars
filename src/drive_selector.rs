@@ -109,8 +109,8 @@ mod tests {
 
     fn drives() -> Vec<DriveInfo> {
         vec![
-            DriveInfo { name: "C:".into(), total_space: 500_000, available_space: 100_000 },
-            DriveInfo { name: "D:".into(), total_space: 1_000_000, available_space: 400_000 },
+            DriveInfo { name: "C:".into(), volume_label: "OS".into(), total_space: 500_000, available_space: 100_000 },
+            DriveInfo { name: "D:".into(), volume_label: "Data".into(), total_space: 1_000_000, available_space: 400_000 },
         ]
     }
 

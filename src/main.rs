@@ -21,6 +21,7 @@ fn enumerate_drives() -> Vec<DriveInfo> {
             };
             DriveInfo {
                 name,
+                volume_label: d.name().to_string_lossy().into_owned(),
                 total_space: d.total_space(),
                 available_space: d.available_space(),
             }

@@ -246,6 +246,9 @@ fn build_node(
         current_size: db_node.size,
         prev_size: None,
         children,
+        file_count: db_node.file_count,
+        folder_count: db_node.folder_count,
+        modified: db_node.modified.clone(),
     }
 }
 
