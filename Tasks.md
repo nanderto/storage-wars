@@ -50,10 +50,10 @@
 - [x] Commit, push, open PR
 
 ## Phase 4 — App Wiring
-- [ ] Create branch `phase-4-app-wiring`
-- [ ] Create `src/app_view.rs`
-- [ ] Edit `src/main.rs` — full entry point
-- [ ] `cargo check` — no errors
+- [x] Create branch `phase-4-app-wiring`
+- [x] Create `src/app_view.rs`
+- [x] Edit `src/main.rs` — full entry point
+- [x] `cargo check` — no errors
 - [ ] Commit, push, open PR
 
 ## Phase 5 — Build & Fix

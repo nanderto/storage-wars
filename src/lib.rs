@@ -1,3 +1,4 @@
+pub mod app_view;
 pub mod drive_selector;
 pub mod models;
 pub mod persistence;
