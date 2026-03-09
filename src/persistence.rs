@@ -24,7 +24,10 @@ CREATE TABLE IF NOT EXISTS nodes (
     name        TEXT    NOT NULL,
     path        TEXT    NOT NULL,
     is_dir      BOOLEAN NOT NULL,
-    size        INTEGER NOT NULL
+    size         INTEGER NOT NULL,
+    file_count   INTEGER NOT NULL DEFAULT 0,
+    folder_count INTEGER NOT NULL DEFAULT 0,
+    modified     TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_nodes_scan ON nodes(scan_id);
@@ -73,8 +76,8 @@ pub fn save_scan(conn: &Connection, drive: &str, root: &FsNode) -> Result<i64> {
     let scan_id = conn.last_insert_rowid();
 
     let mut stmt = conn.prepare(
-        "INSERT INTO nodes (scan_id, parent_id, name, path, is_dir, size)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO nodes (scan_id, parent_id, name, path, is_dir, size, file_count, folder_count, modified)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
     )?;
 
     let mut stack: Vec<(&FsNode, Option<i64>)> = vec![(root, None)];
@@ -86,6 +89,9 @@ pub fn save_scan(conn: &Connection, drive: &str, root: &FsNode) -> Result<i64> {
             node.path.to_string_lossy().as_ref(),
             node.is_dir,
             node.current_size as i64,
+            node.file_count as i64,
+            node.folder_count as i64,
+            node.modified,
         ])?;
         let node_id = conn.last_insert_rowid();
         for child in &node.children {
@@ -117,7 +123,7 @@ pub fn get_scans_for_drive(conn: &Connection, drive: &str) -> Result<Vec<ScanMet
 
 pub fn load_scan_tree(conn: &Connection, scan_id: i64) -> Result<Vec<DbNode>> {
     let mut stmt = conn.prepare(
-        "SELECT id, scan_id, parent_id, name, path, is_dir, size
+        "SELECT id, scan_id, parent_id, name, path, is_dir, size, file_count, folder_count, modified
          FROM nodes WHERE scan_id = ?1",
     )?;
     let rows = stmt.query_map(params![scan_id], |row| {
@@ -129,6 +135,9 @@ pub fn load_scan_tree(conn: &Connection, scan_id: i64) -> Result<Vec<DbNode>> {
             path: row.get(4)?,
             is_dir: row.get(5)?,
             size: row.get::<_, i64>(6)? as u64,
+            file_count: row.get::<_, i64>(7)? as u64,
+            folder_count: row.get::<_, i64>(8)? as u64,
+            modified: row.get(9)?,
         })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
@@ -161,7 +170,7 @@ fn chrono_now() -> String {
 }
 
 /// Converts days since Unix epoch to (year, month, day).
-fn days_to_ymd(days: u64) -> (u64, u64, u64) {
+pub fn days_to_ymd(days: u64) -> (u64, u64, u64) {
     // Algorithm from http://howardhinnant.github.io/date_algorithms.html
     let z = days + 719_468;
     let era = z / 146_097;
@@ -207,7 +216,13 @@ mod tests {
                         current_size: 100,
                         prev_size: None,
                         children: vec![],
+                        file_count: 0,
+                        folder_count: 0,
+                        modified: None,
                     }],
+                    file_count: 1,
+                    folder_count: 0,
+                    modified: None,
                 },
                 FsNode {
                     name: "empty".into(),
@@ -216,8 +231,14 @@ mod tests {
                     current_size: 0,
                     prev_size: None,
                     children: vec![],
+                    file_count: 0,
+                    folder_count: 0,
+                    modified: None,
                 },
             ],
+            file_count: 1,
+            folder_count: 2,
+            modified: None,
         }
     }
 
@@ -294,5 +315,44 @@ mod tests {
 
         let scans = get_scans_for_drive(&conn, "C:").unwrap();
         assert_eq!(scans[0].total_size, 300);
+    }
+
+    #[test]
+    fn save_and_load_roundtrip_new_fields() {
+        let conn = open_in_memory().unwrap();
+        let tree = FsNode {
+            name: "root".into(),
+            path: PathBuf::from("C:/"),
+            is_dir: true,
+            current_size: 100,
+            prev_size: None,
+            children: vec![FsNode {
+                name: "file.txt".into(),
+                path: PathBuf::from("C:/file.txt"),
+                is_dir: false,
+                current_size: 100,
+                prev_size: None,
+                children: vec![],
+                file_count: 0,
+                folder_count: 0,
+                modified: Some("2026-03-10T12:00:00Z".into()),
+            }],
+            file_count: 1,
+            folder_count: 0,
+            modified: Some("2026-03-10T12:00:00Z".into()),
+        };
+
+        let scan_id = save_scan(&conn, "C:", &tree).unwrap();
+        let nodes = load_scan_tree(&conn, scan_id).unwrap();
+
+        let root = nodes.iter().find(|n| n.name == "root").unwrap();
+        assert_eq!(root.file_count, 1);
+        assert_eq!(root.folder_count, 0);
+        assert_eq!(root.modified.as_deref(), Some("2026-03-10T12:00:00Z"));
+
+        let file = nodes.iter().find(|n| n.name == "file.txt").unwrap();
+        assert_eq!(file.file_count, 0);
+        assert_eq!(file.folder_count, 0);
+        assert_eq!(file.modified.as_deref(), Some("2026-03-10T12:00:00Z"));
     }
 }

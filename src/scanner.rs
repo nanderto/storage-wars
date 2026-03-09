@@ -4,6 +4,20 @@ use std::path::{Path, PathBuf};
 
 use crate::models::{DbNode, FsNode, UiNode};
 
+/// Format a `SystemTime` as an ISO 8601 string (UTC, second precision).
+fn format_system_time(t: std::time::SystemTime) -> String {
+    let secs = t
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let sec = secs % 60;
+    let min = (secs / 60) % 60;
+    let hour = (secs / 3600) % 24;
+    let days = secs / 86400;
+    let (year, month, day) = crate::persistence::days_to_ymd(days);
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{min:02}:{sec:02}Z")
+}
+
 // ---------------------------------------------------------------------------
 // Synchronous directory scanner (run on a background thread)
 // ---------------------------------------------------------------------------
@@ -19,6 +33,12 @@ pub fn scan_dir_sync(root: &Path) -> FsNode {
 
     let is_dir = meta.as_ref().map(|m| m.is_dir()).unwrap_or(false);
 
+    let modified = meta
+        .as_ref()
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .map(format_system_time);
+
     if !is_dir {
         let size = meta.map(|m| m.len()).unwrap_or(0);
         return FsNode {
@@ -28,6 +48,9 @@ pub fn scan_dir_sync(root: &Path) -> FsNode {
             current_size: size,
             prev_size: None,
             children: vec![],
+            file_count: 0,
+            folder_count: 0,
+            modified,
         };
     }
 
@@ -39,6 +62,12 @@ pub fn scan_dir_sync(root: &Path) -> FsNode {
     }
 
     let total: u64 = children.iter().map(|c| c.current_size).sum();
+    let file_count: u64 = children.iter().map(|c| {
+        if c.is_dir { c.file_count } else { 1 }
+    }).sum();
+    let folder_count: u64 = children.iter().map(|c| {
+        if c.is_dir { 1 + c.folder_count } else { 0 }
+    }).sum();
 
     FsNode {
         name,
@@ -47,6 +76,9 @@ pub fn scan_dir_sync(root: &Path) -> FsNode {
         current_size: total,
         prev_size: None,
         children,
+        file_count,
+        folder_count,
+        modified,
     }
 }
 
@@ -148,7 +180,13 @@ mod tests {
                         current_size: 200,
                         prev_size: None,
                         children: vec![],
+                        file_count: 0,
+                        folder_count: 0,
+                        modified: None,
                     }],
+                    file_count: 1,
+                    folder_count: 0,
+                    modified: None,
                 },
                 FsNode {
                     name: "empty".into(),
@@ -157,8 +195,14 @@ mod tests {
                     current_size: 0,
                     prev_size: None,
                     children: vec![],
+                    file_count: 0,
+                    folder_count: 0,
+                    modified: None,
                 },
             ],
+            file_count: 1,
+            folder_count: 2,
+            modified: None,
         }]
     }
 
@@ -172,6 +216,9 @@ mod tests {
                 path: "/root".into(),
                 is_dir: true,
                 size: 300,
+                file_count: 1,
+                folder_count: 2,
+                modified: None,
             },
             DbNode {
                 id: 2,
@@ -181,6 +228,9 @@ mod tests {
                 path: "/root/docs".into(),
                 is_dir: true,
                 size: 200,
+                file_count: 1,
+                folder_count: 0,
+                modified: None,
             },
             DbNode {
                 id: 3,
@@ -190,6 +240,9 @@ mod tests {
                 path: "/root/docs/readme.txt".into(),
                 is_dir: false,
                 size: 200,
+                file_count: 0,
+                folder_count: 0,
+                modified: None,
             },
         ]
     }
@@ -384,5 +437,50 @@ mod tests {
 
         let node = scan_dir_sync(dir.path());
         assert_eq!(node.current_size, 512, "sizes should propagate through all levels");
+    }
+
+    #[test]
+    fn scan_dir_sync_file_and_folder_counts() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+
+        std::fs::write(root.join("a.txt"), b"a").unwrap();
+        std::fs::write(root.join("b.txt"), b"b").unwrap();
+
+        let sub = root.join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join("c.txt"), b"c").unwrap();
+
+        let node = scan_dir_sync(root);
+
+        // root has 3 files total (a.txt, b.txt, sub/c.txt) and 1 folder (sub)
+        assert_eq!(node.file_count, 3);
+        assert_eq!(node.folder_count, 1);
+
+        let sub_node = node.children.iter().find(|c| c.name == "sub").unwrap();
+        assert_eq!(sub_node.file_count, 1);
+        assert_eq!(sub_node.folder_count, 0);
+
+        // File entries have 0 counts
+        let a_node = node.children.iter().find(|c| c.name == "a.txt").unwrap();
+        assert_eq!(a_node.file_count, 0);
+        assert_eq!(a_node.folder_count, 0);
+    }
+
+    #[test]
+    fn scan_dir_sync_modified_timestamps_present() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("file.txt"), b"data").unwrap();
+
+        let node = scan_dir_sync(dir.path());
+        // The directory itself should have a modified timestamp
+        assert!(node.modified.is_some(), "directory should have modified timestamp");
+
+        let file_node = node.children.iter().find(|c| c.name == "file.txt").unwrap();
+        assert!(file_node.modified.is_some(), "file should have modified timestamp");
+
+        // Timestamps should be ISO 8601 format
+        let ts = file_node.modified.as_ref().unwrap();
+        assert!(ts.contains('T') && ts.ends_with('Z'), "timestamp should be ISO 8601: {ts}");
     }
 }
