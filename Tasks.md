@@ -94,11 +94,11 @@
 - [x] `app_view.rs`: Render TitleBar at top, restructure layout (title → toolbar → content)
 
 ### 6d. Drive Selector Rewrite
-- [ ] `drive_selector.rs`: Replace sidebar layout with gpui-component `Select` dropdown
-- [ ] Implement `DriveSelectItem` struct with `SelectItem` trait
-- [ ] Subscribe to `SelectEvent::Confirm` → emit `DriveSelectorEvent::DriveSelected`
-- [ ] Update drive_selector tests for new Select-based internals
-- [ ] `cargo test` — drive_selector tests pass
+- [x] `drive_selector.rs`: Replace sidebar layout with gpui-component `Select` dropdown
+- [x] Implement `DriveSelectItem` struct with `SelectItem` trait
+- [x] Subscribe to `SelectEvent::Confirm` → emit `DriveSelectorEvent::DriveSelected`
+- [x] Update drive_selector tests for new Select-based internals
+- [x] `cargo test` — drive_selector tests pass
 
 ### 6e. Tree View — Columnar Explorer
 - [ ] `tree_view.rs`: Add column header row (Name, % of Parent, Size, Prev Size, % Prev, Files, Folders, Modified)
