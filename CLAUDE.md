@@ -66,6 +66,20 @@ See `Tasks.md` for the phased checklist. Phases must be completed and reviewed o
 
 **Important**: Do not proceed to the next phase without explicit user approval.
 
+## Testing Rules
+
+- **Tests are mandatory** for all non-UI code. Every new module must include a `#[cfg(test)]` block.
+- **Tests must pass** — do not weaken assertions, remove test cases, or skip tests to get a green run. If a test cannot be made to pass, stop and check with the user before changing the test.
+- **Prefer real implementations over mocks.** Use in-memory SQLite (`Connection::open_in_memory()`), `tempfile::TempDir`, and real data structures. Only mock at true system boundaries (e.g. OS calls with no test seam), and only after checking with the user.
+- **Linting is mandatory** — run `cargo clippy -- -D warnings` and resolve all warnings before committing. No `#[allow(...)]` suppressions without explicit user approval.
+- **Test command reference**:
+  ```bash
+  cargo test                        # all tests
+  cargo test -- --nocapture         # with stdout
+  cargo test persistence            # filter by module name
+  cargo clippy -- -D warnings       # lint (must be clean)
+  ```
+
 ## Key Architecture Notes
 
 - `AppState` (in `app_view.rs`) is the single source of truth — drives, selected drive, scan history, compare selections, flattened tree nodes, scanning flag.
