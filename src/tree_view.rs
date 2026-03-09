@@ -264,9 +264,8 @@ mod tests {
         let captured = received.clone();
         let _sub = cx.update(|_window, app| {
             app.subscribe(&view, move |_, event: &TreeViewEvent, _| {
-                if let TreeViewEvent::ToggleExpand(path) = event {
-                    captured.borrow_mut().push(path.clone());
-                }
+                let TreeViewEvent::ToggleExpand(path) = event;
+                captured.borrow_mut().push(path.clone());
             })
         });
 
