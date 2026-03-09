@@ -61,4 +61,4 @@
 - [x] `cargo build` — resolve all compile errors
 - [x] `cargo test` — all tests pass (49 tests, 0 warnings)
 - [x] `cargo clippy -- -D warnings` — clean
-- [ ] Commit, push, open PR
+- [x] Commit, push, open PR
