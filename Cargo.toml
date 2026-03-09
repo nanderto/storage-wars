@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 gpui = { git = "https://github.com/zed-industries/zed", branch = "main" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", branch = "main" }
 serde = { version = "1", features = ["derive"] }
 anyhow = "1"
 dirs = "5"
