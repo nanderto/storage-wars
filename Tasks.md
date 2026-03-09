@@ -54,7 +54,7 @@
 - [x] Create `src/app_view.rs`
 - [x] Edit `src/main.rs` — full entry point
 - [x] `cargo check` — no errors
-- [ ] Commit, push, open PR
+- [x] Commit, push, open PR
 
 ## Phase 5 — Build & Fix
 - [ ] Create branch `phase-5-build-fix`
