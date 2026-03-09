@@ -1,5 +1,6 @@
 use gpui::prelude::*;
-use gpui::{App, Bounds, SharedString, WindowBounds, WindowOptions, size};
+use gpui::{App, Bounds, WindowBounds, WindowOptions, size};
+use gpui_component::TitleBar;
 
 use storage_wars::app_view::AppView;
 use storage_wars::models::DriveInfo;
@@ -33,23 +34,23 @@ fn main() {
     let drives = enumerate_drives();
 
     gpui_platform::application().run(move |cx: &mut App| {
+        gpui_component::init(cx);
+
         let drives = drives.clone();
         let bounds = Bounds::centered(None, size(gpui::px(1280.), gpui::px(800.)), cx);
         cx.open_window(
             WindowOptions {
-                titlebar: Some(gpui::TitlebarOptions {
-                    title: Some(SharedString::from("Storage Wars")),
-                    ..Default::default()
-                }),
+                titlebar: Some(TitleBar::title_bar_options()),
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 ..Default::default()
             },
-            |_, cx| {
-                cx.new(|cx| {
-                    let mut view = AppView::new(cx);
-                    view.set_drives(drives.clone(), cx);
-                    view
-                })
+            |window, cx| {
+                let view = cx.new(|cx| {
+                    let mut app_view = AppView::new(cx);
+                    app_view.set_drives(drives.clone(), cx);
+                    app_view
+                });
+                cx.new(|cx| gpui_component::Root::new(view, window, cx))
             },
         )
         .unwrap();

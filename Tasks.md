@@ -86,11 +86,12 @@
 - [x] `cargo test` — all 55 tests pass
 
 ### 6c. Window Chrome + Root Wrapper
-- [ ] `main.rs`: Call `gpui_component::init(cx)` before opening window
-- [ ] `main.rs`: Use `TitleBar::title_bar_options()` for `WindowOptions.titlebar`
-- [ ] `main.rs`: Wrap `AppView` in `Root::new()` for theming/popups
+- [x] `main.rs`: Call `gpui_component::init(cx)` before opening window
+- [x] `main.rs`: Use `TitleBar::title_bar_options()` for `WindowOptions.titlebar`
+- [x] `main.rs`: Wrap `AppView` in `Root::new()` for theming/popups
 - [x] `main.rs`: Enrich `enumerate_drives()` with `volume_label` from `sysinfo`
-- [ ] `cargo check` — compiles with new gpui-component dependency
+- [x] `cargo check` — compiles with new gpui-component dependency
+- [x] `app_view.rs`: Render TitleBar at top, restructure layout (title → toolbar → content)
 
 ### 6d. Drive Selector Rewrite
 - [ ] `drive_selector.rs`: Replace sidebar layout with gpui-component `Select` dropdown

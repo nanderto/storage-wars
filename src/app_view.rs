@@ -6,6 +6,7 @@ use gpui::{
     div, px, rgb, App, AsyncApp, ClickEvent, Context, Entity, Focusable, FocusHandle, IntoElement,
     Render, WeakEntity, Window,
 };
+use gpui_component::TitleBar;
 
 use crate::drive_selector::{DriveSelector, DriveSelectorEvent};
 use crate::models::{DbNode, DriveInfo, FsNode};
@@ -274,54 +275,68 @@ impl Render for AppView {
 
         div()
             .flex()
-            .w_full()
-            .h_full()
+            .flex_col()
+            .size_full()
             .bg(rgb(0x1e1e2e))
-            // Left panel: drive list
-            .child(self.drive_selector.clone())
-            // Middle panel: scan history
-            .child(self.scan_history.clone())
-            // Right area: toolbar + tree
+            // Row 1: Title bar
+            .child(
+                TitleBar::new().child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .w_full()
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(rgb(0xcdd6f4))
+                                .child("Storage Wars"),
+                        ),
+                ),
+            )
+            // Row 2: Toolbar
             .child(
                 div()
                     .flex()
-                    .flex_col()
-                    .flex_grow()
-                    .h_full()
-                    // Toolbar row
+                    .items_center()
+                    .gap_3()
+                    .px_4()
+                    .py_2()
+                    .h(px(44.))
+                    .bg(rgb(0x181825))
+                    .border_b_1()
+                    .border_color(rgb(0x313244))
+                    .child(self.drive_selector.clone())
                     .child(
                         div()
-                            .flex()
-                            .items_center()
-                            .gap_3()
+                            .id("scan-now")
                             .px_4()
-                            .py_2()
-                            .h(px(44.))
-                            .bg(rgb(0x181825))
-                            .border_b_1()
-                            .border_color(rgb(0x313244))
-                            .child(
-                                div()
-                                    .id("scan-now")
-                                    .px_4()
-                                    .py_1()
-                                    .rounded_md()
-                                    .cursor_pointer()
-                                    .when(has_drive && !scanning, |el| el.bg(rgb(0x89b4fa)))
-                                    .when(!has_drive || scanning, |el| el.bg(rgb(0x313244)))
-                                    .text_color(if has_drive && !scanning {
-                                        rgb(0x1e1e2e)
-                                    } else {
-                                        rgb(0x6c7086)
-                                    })
-                                    .text_sm()
-                                    .child(scan_label)
-                                    .on_click(cx.listener(|this, _: &ClickEvent, _window, cx| {
-                                        this.start_scan(cx);
-                                    })),
-                            ),
-                    )
-                    // Tree view fills remaining space
+                            .py_1()
+                            .rounded_md()
+                            .cursor_pointer()
+                            .when(has_drive && !scanning, |el| el.bg(rgb(0x89b4fa)))
+                            .when(!has_drive || scanning, |el| el.bg(rgb(0x313244)))
+                            .text_color(if has_drive && !scanning {
+                                rgb(0x1e1e2e)
+                            } else {
+                                rgb(0x6c7086)
+                            })
+                            .text_sm()
+                            .child(scan_label)
+                            .on_click(cx.listener(|this, _: &ClickEvent, _window, cx| {
+                                this.start_scan(cx);
+                            })),
+                    ),
+            )
+            // Row 3: Main content
+            .child(
+                div()
+                    .flex()
+                    .flex_grow()
+                    .min_h_0()
+                    // Left: scan history sidebar
+                    .child(self.scan_history.clone())
+                    // Right: tree view
                     .child(self.tree_view.clone()),
             )
     }
