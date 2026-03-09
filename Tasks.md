@@ -57,7 +57,8 @@
 - [x] Commit, push, open PR
 
 ## Phase 5 — Build & Fix
-- [ ] Create branch `phase-5-build-fix`
-- [ ] `cargo build` — resolve all compile errors
-- [ ] `cargo test` — all tests pass
-- [ ] Commit: `"feat: initial storage-wars implementation"`, push, open PR
+- [x] Create branch `phase-5-build-fix`
+- [x] `cargo build` — resolve all compile errors
+- [x] `cargo test` — all tests pass (49 tests, 0 warnings)
+- [x] `cargo clippy -- -D warnings` — clean
+- [x] Commit, push, open PR

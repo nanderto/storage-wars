@@ -158,9 +158,8 @@ mod tests {
         let captured = selected.clone();
         let _sub = cx.update(|_window, app| {
             app.subscribe(&view, move |_, event: &DriveSelectorEvent, _| {
-                if let DriveSelectorEvent::DriveSelected(name) = event {
-                    captured.borrow_mut().push(name.clone());
-                }
+                let DriveSelectorEvent::DriveSelected(name) = event;
+                captured.borrow_mut().push(name.clone());
             })
         });
 
