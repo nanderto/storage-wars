@@ -393,8 +393,64 @@ impl Render for AppView {
                         .child(
                             div()
                                 .text_sm()
-                                .text_color(normal)
+                                .font_weight(gpui::FontWeight::BOLD)
+                                .text_color(rgb(0x89b4fa))
                                 .child("Storage Wars"),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_1()
+                                // Settings gear
+                                .child(
+                                    div()
+                                        .id("btn-settings")
+                                        .px_2()
+                                        .py_0p5()
+                                        .rounded_sm()
+                                        .cursor_pointer()
+                                        .hover(|s| s.bg(rgb(0x313244)))
+                                        .text_color(dim)
+                                        .text_sm()
+                                        .child("\u{2699}"),
+                                )
+                                // Minimize
+                                .child(
+                                    div()
+                                        .id("btn-minimize")
+                                        .px_2()
+                                        .py_0p5()
+                                        .rounded_sm()
+                                        .cursor_pointer()
+                                        .hover(|s| s.bg(rgb(0x313244)))
+                                        .text_color(dim)
+                                        .text_sm()
+                                        .child("\u{2014}")
+                                        .on_click(cx.listener(
+                                            |_this, _: &ClickEvent, window, _cx| {
+                                                window.minimize_window();
+                                            },
+                                        )),
+                                )
+                                // Close
+                                .child(
+                                    div()
+                                        .id("btn-close")
+                                        .px_2()
+                                        .py_0p5()
+                                        .rounded_sm()
+                                        .cursor_pointer()
+                                        .hover(|s| s.bg(rgb(0xef4444)))
+                                        .text_color(dim)
+                                        .text_sm()
+                                        .child("\u{2715}")
+                                        .on_click(cx.listener(
+                                            |_this, _: &ClickEvent, _window, cx| {
+                                                cx.quit();
+                                            },
+                                        )),
+                                ),
                         ),
                 ),
             )
@@ -463,22 +519,12 @@ impl Render for AppView {
                     // Right group: drive info panel
                     .child(drive_info_panel),
             )
-            // Row 3: Main content
+            // Row 3: Main content — tree view fills the area
             .child(
                 div()
                     .flex()
                     .flex_grow()
                     .min_h_0()
-                    // Left: scan history sidebar (280px)
-                    .child(
-                        div()
-                            .w(px(280.))
-                            .flex_shrink_0()
-                            .border_r_1()
-                            .border_color(border)
-                            .child(self.scan_history.clone()),
-                    )
-                    // Right: tree view (flex-grow)
                     .child(self.tree_view.clone()),
             )
             // Row 4: Status bar
