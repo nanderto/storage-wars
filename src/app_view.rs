@@ -135,10 +135,20 @@ impl AppView {
             }
         }
 
-        // No previous scan — auto-start one
-        let tv = self.tree_view.clone();
-        tv.update(cx, |v, cx| v.set_nodes(vec![], cx));
-        self.start_scan(cx);
+        // No previous scan — show the drive root as a single unexpanded node
+        self.current_scan_root = Some(FsNode {
+            name: format!("{}\\", drive),
+            path: PathBuf::from(format!("{}\\", drive)),
+            is_dir: true,
+            current_size: 0,
+            prev_size: None,
+            children: vec![],
+            file_count: 0,
+            folder_count: 0,
+            modified: None,
+        });
+        self.scan_status = "Ready".into();
+        self.rebuild_tree(cx);
     }
 
     fn on_compare_requested(&mut self, base_id: i64, new_id: i64, cx: &mut Context<Self>) {
