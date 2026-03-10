@@ -415,17 +415,17 @@ impl Render for AppView {
                     .items_center()
                     .justify_between()
                     .h(px(34.))
-                    .px_3()
                     .bg(rgb(0x181825))
                     .border_b_1()
                     .border_color(border)
-                    // Left: app title (drag area)
+                    // Left: app title (drag area) — left padding only
                     .child(
                         div()
                             .flex()
                             .items_center()
                             .flex_grow()
                             .h_full()
+                            .pl_3()
                             .window_control_area(WindowControlArea::Drag)
                             .child(
                                 div()
@@ -435,7 +435,7 @@ impl Render for AppView {
                                     .child("Storage Wars"),
                             ),
                     )
-                    // Right: gear + window controls
+                    // Right: gear + window controls — no right padding, flush to corner
                     .child(
                         div()
                             .flex()
@@ -449,7 +449,7 @@ impl Render for AppView {
                                     .flex()
                                     .justify_center()
                                     .items_center()
-                                    .w(px(40.))
+                                    .w(px(46.))
                                     .h_full()
                                     .cursor_pointer()
                                     .hover(|s| s.bg(rgb(0x313244)))
@@ -464,7 +464,7 @@ impl Render for AppView {
                                     .flex()
                                     .justify_center()
                                     .items_center()
-                                    .w(px(40.))
+                                    .w(px(46.))
                                     .h_full()
                                     .cursor_pointer()
                                     .text_color(normal)
@@ -480,23 +480,23 @@ impl Render for AppView {
                                     .flex()
                                     .justify_center()
                                     .items_center()
-                                    .w(px(40.))
+                                    .w(px(46.))
                                     .h_full()
                                     .cursor_pointer()
                                     .text_color(normal)
                                     .hover(|s| s.bg(rgb(0x313244)))
-                                    .text_sm()
+                                    .text_base()
                                     .window_control_area(WindowControlArea::Max)
-                                    .child("\u{25A1}"),
+                                    .child("\u{25FB}"),
                             )
-                            // Close
+                            // Close — flush to top-right corner
                             .child(
                                 div()
                                     .id("btn-close")
                                     .flex()
                                     .justify_center()
                                     .items_center()
-                                    .w(px(40.))
+                                    .w(px(46.))
                                     .h_full()
                                     .cursor_pointer()
                                     .text_color(normal)
