@@ -1,6 +1,7 @@
 use gpui::prelude::*;
 use gpui::{App, Bounds, WindowBounds, WindowOptions, size};
 use gpui_component::TitleBar;
+use gpui_component::theme::{Theme, ThemeMode};
 
 use storage_wars::app_view::AppView;
 use storage_wars::models::DriveInfo;
@@ -35,6 +36,7 @@ fn main() {
 
     gpui_platform::application().run(move |cx: &mut App| {
         gpui_component::init(cx);
+        Theme::change(ThemeMode::Dark, None, cx);
 
         let drives = drives.clone();
         let bounds = Bounds::centered(None, size(gpui::px(1280.), gpui::px(800.)), cx);
@@ -46,8 +48,8 @@ fn main() {
             },
             |window, cx| {
                 let view = cx.new(|cx| {
-                    let mut app_view = AppView::new(cx);
-                    app_view.set_drives(drives.clone(), cx);
+                    let mut app_view = AppView::new(window, cx);
+                    app_view.set_drives(drives.clone(), window, cx);
                     app_view
                 });
                 cx.new(|cx| gpui_component::Root::new(view, window, cx))
