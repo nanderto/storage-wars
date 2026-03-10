@@ -101,30 +101,30 @@
 - [x] `cargo test` — drive_selector tests pass
 
 ### 6e. Tree View — Columnar Explorer
-- [ ] `tree_view.rs`: Add column header row (Name, % of Parent, Size, Prev Size, % Prev, Files, Folders, Modified)
-- [ ] Render each data row with fixed-width columns (right-aligned numbers)
-- [ ] Name column: tree indent + chevron + icon + name (flex-grow)
-- [ ] % of Parent column: `scan_progress * 100` as "XX.X %" text
-- [ ] Size / Prev Size columns: `format_size()` values
-- [ ] % of Previous Size: computed change percentage
-- [ ] Files / Folders columns: `format_number()` counts
-- [ ] Modified column: timestamp string
-- [ ] Update tree_view tests
-- [ ] `cargo test` — tree_view tests pass
+- [x] `tree_view.rs`: Add column header row (Name, % of Parent, Size, Prev Size, % Prev, Files, Folders, Modified)
+- [x] Render each data row with fixed-width columns (right-aligned numbers)
+- [x] Name column: tree indent + chevron + icon + name (flex-grow)
+- [x] % of Parent column: `scan_progress * 100` as "XX.X %" text
+- [x] Size / Prev Size columns: `format_size()` values
+- [x] % of Previous Size: computed change percentage
+- [x] Files / Folders columns: `format_number()` counts
+- [x] Modified column: timestamp string
+- [x] Update tree_view tests
+- [x] `cargo test` — tree_view tests pass
 
 ### 6f. App Layout Restructure
-- [ ] `app_view.rs`: Add `drives`, `scan_item_count`, `last_scan_time` fields
-- [ ] `app_view.rs`: Change constructor to accept `window: &mut Window` param
-- [ ] Render: Row 1 — `TitleBar::new().child("Storage Wars")`
-- [ ] Render: Row 2 — Toolbar (DriveSelector dropdown + Scan button + usage bar + drive properties)
-- [ ] Render: Row 3 — Main content (ScanHistory 280px sidebar + TreeView flex-grow)
-- [ ] Render: Row 4 — Status bar (item count + drive path + last scan time)
-- [ ] Update `set_drives()` to store drives locally for toolbar display
-- [ ] Update scan/compare handlers to set `scan_item_count` and `last_scan_time`
-- [ ] `cargo check` — compiles
+- [x] `app_view.rs`: Add `drives`, `scan_item_count`, `last_scan_time` fields
+- [x] `app_view.rs`: Change constructor to accept `window: &mut Window` param
+- [x] Render: Row 1 — `TitleBar::new().child("Storage Wars")`
+- [x] Render: Row 2 — Toolbar (DriveSelector dropdown + Scan button + usage bar + drive properties)
+- [x] Render: Row 3 — Main content (ScanHistory 280px sidebar + TreeView flex-grow)
+- [x] Render: Row 4 — Status bar (item count + drive path + last scan time)
+- [x] Update `set_drives()` to store drives locally for toolbar display
+- [x] Update scan/compare handlers to set `scan_item_count` and `last_scan_time`
+- [x] `cargo check` — compiles
 
 ### 6g. Final Verification
-- [ ] `cargo clippy -- -D warnings` — clean
-- [ ] `cargo test` — all tests pass
+- [x] `cargo clippy -- -D warnings` — clean
+- [x] `cargo test` — all tests pass
 - [ ] `cargo run` — manual verification
-- [ ] Commit, push, open PR
+- [x] Commit, push, open PR

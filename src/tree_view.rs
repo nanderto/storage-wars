@@ -4,7 +4,7 @@ use gpui::{
     FocusHandle, IntoElement, Render, Rgba, SharedString, Window,
 };
 
-use crate::models::{format_size, SizeChange, UiNode};
+use crate::models::{format_number, format_size, SizeChange, UiNode};
 
 // ---------------------------------------------------------------------------
 // Events
@@ -64,10 +64,70 @@ struct RowSnapshot {
     chevron: SharedString,
     icon: SharedString,
     name: SharedString,
+    pct_of_parent: SharedString,
     size_label: SharedString,
+    prev_size_label: SharedString,
+    pct_prev: SharedString,
+    files_label: SharedString,
+    folders_label: SharedString,
+    modified_label: SharedString,
     scan_progress: f32,
     bar_color: Rgba,
 }
+
+fn format_pct_prev(node: &crate::models::FsNode) -> String {
+    match node.prev_size {
+        None => "—".into(),
+        Some(0) if node.current_size == 0 => "0.0 %".into(),
+        Some(0) => "∞".into(),
+        Some(prev) => {
+            let pct = (node.current_size as f64 / prev as f64) * 100.0;
+            format!("{pct:.1} %")
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Column header
+// ---------------------------------------------------------------------------
+
+fn column_header() -> gpui::Div {
+    let header_text = rgb(0x7f849c);
+    let border = rgb(0x313244);
+
+    div()
+        .flex()
+        .items_center()
+        .w_full()
+        .h(px(26.))
+        .bg(rgb(0x181825))
+        .border_b_1()
+        .border_color(border)
+        .text_xs()
+        .text_color(header_text)
+        // Name (flex-grow)
+        .child(div().flex_grow().pl(px(8.)).child("Name"))
+        // % of Parent
+        .child(div().flex_shrink_0().w(px(80.)).text_right().px_2().child("% Parent"))
+        // Bar
+        .child(div().flex_shrink_0().w(px(120.)).px_2().child(""))
+        // Size
+        .child(div().flex_shrink_0().w(px(80.)).text_right().px_2().child("Size"))
+        // Prev Size
+        .child(div().flex_shrink_0().w(px(80.)).text_right().px_2().child("Prev Size"))
+        // % Prev
+        .child(div().flex_shrink_0().w(px(70.)).text_right().px_2().child("% Prev"))
+        // Files
+        .child(div().flex_shrink_0().w(px(90.)).text_right().px_2().child("Files"))
+        // Folders
+        .child(div().flex_shrink_0().w(px(90.)).text_right().px_2().child("Folders"))
+        // Modified
+        .child(div().flex_shrink_0().w(px(160.)).px_2().child("Modified"))
+}
+
+// ---------------------------------------------------------------------------
+// Render
+// ---------------------------------------------------------------------------
 
 impl Render for TreeView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -77,6 +137,11 @@ impl Render for TreeView {
             .enumerate()
             .map(|(ix, node)| {
                 let change = SizeChange::from_node(&node.fs_node);
+                let pct_parent = format!("{:.1} %", node.scan_progress * 100.0);
+                let prev_size_label = match node.fs_node.prev_size {
+                    Some(s) => format_size(s),
+                    None => "—".into(),
+                };
                 RowSnapshot {
                     ix,
                     indent: node.depth as f32 * 16.0,
@@ -95,12 +160,26 @@ impl Render for TreeView {
                         "📄 ".into()
                     },
                     name: node.fs_node.name.clone().into(),
+                    pct_of_parent: pct_parent.into(),
                     size_label: format_size(node.fs_node.current_size).into(),
+                    prev_size_label: prev_size_label.into(),
+                    pct_prev: format_pct_prev(&node.fs_node).into(),
+                    files_label: format_number(node.fs_node.file_count).into(),
+                    folders_label: format_number(node.fs_node.folder_count).into(),
+                    modified_label: node
+                        .fs_node
+                        .modified
+                        .clone()
+                        .unwrap_or_else(|| "—".into())
+                        .into(),
                     scan_progress: node.scan_progress,
                     bar_color: bar_color(change),
                 }
             })
             .collect();
+
+        let dim_text = rgb(0xa6adc8);
+        let normal_text = rgb(0xcdd6f4);
 
         let rows = snapshots.into_iter().map(|row| {
             let path = row.path.clone();
@@ -119,12 +198,14 @@ impl Render for TreeView {
                         cx.emit(TreeViewEvent::ToggleExpand(path.clone()));
                     }
                 }))
-                // Indent + chevron + icon + name
+                // Name column (flex-grow): indent + chevron + icon + name
                 .child(
                     div()
                         .flex()
                         .items_center()
-                        .flex_shrink_0()
+                        .flex_grow()
+                        .min_w_0()
+                        .overflow_hidden()
                         .pl(px(row.indent))
                         .child(
                             div()
@@ -135,21 +216,22 @@ impl Render for TreeView {
                         .child(div().text_xs().child(row.icon))
                         .child(
                             div()
-                                .text_color(rgb(0xcdd6f4))
+                                .text_color(normal_text)
                                 .text_sm()
+                                .overflow_hidden()
                                 .child(row.name),
                         ),
                 )
-                // Spacer
-                .child(div().flex_grow())
-                // Size label
+                // % of Parent
                 .child(
                     div()
                         .flex_shrink_0()
+                        .w(px(80.))
+                        .text_right()
                         .px_2()
-                        .text_color(rgb(0xa6adc8))
+                        .text_color(dim_text)
                         .text_xs()
-                        .child(row.size_label),
+                        .child(row.pct_of_parent),
                 )
                 // Progress bar
                 .child(
@@ -157,7 +239,7 @@ impl Render for TreeView {
                         .flex_shrink_0()
                         .w(px(120.))
                         .h(px(8.))
-                        .mr(px(8.))
+                        .mx_1()
                         .rounded_sm()
                         .bg(rgb(0x313244))
                         .child(
@@ -167,6 +249,71 @@ impl Render for TreeView {
                                 .w(relative(row.scan_progress))
                                 .bg(row.bar_color),
                         ),
+                )
+                // Size
+                .child(
+                    div()
+                        .flex_shrink_0()
+                        .w(px(80.))
+                        .text_right()
+                        .px_2()
+                        .text_color(normal_text)
+                        .text_xs()
+                        .child(row.size_label),
+                )
+                // Prev Size
+                .child(
+                    div()
+                        .flex_shrink_0()
+                        .w(px(80.))
+                        .text_right()
+                        .px_2()
+                        .text_color(dim_text)
+                        .text_xs()
+                        .child(row.prev_size_label),
+                )
+                // % Prev
+                .child(
+                    div()
+                        .flex_shrink_0()
+                        .w(px(70.))
+                        .text_right()
+                        .px_2()
+                        .text_color(dim_text)
+                        .text_xs()
+                        .child(row.pct_prev),
+                )
+                // Files
+                .child(
+                    div()
+                        .flex_shrink_0()
+                        .w(px(90.))
+                        .text_right()
+                        .px_2()
+                        .text_color(dim_text)
+                        .text_xs()
+                        .child(row.files_label),
+                )
+                // Folders
+                .child(
+                    div()
+                        .flex_shrink_0()
+                        .w(px(90.))
+                        .text_right()
+                        .px_2()
+                        .text_color(dim_text)
+                        .text_xs()
+                        .child(row.folders_label),
+                )
+                // Modified
+                .child(
+                    div()
+                        .flex_shrink_0()
+                        .w(px(160.))
+                        .px_2()
+                        .text_color(dim_text)
+                        .text_xs()
+                        .child(row.modified_label),
                 )
         });
 
@@ -187,6 +334,7 @@ impl Render for TreeView {
                         .child("Select a drive and click Scan Now."),
                 )
             })
+            .when(!self.nodes.is_empty(), |el| el.child(column_header()))
             .children(rows)
     }
 }
@@ -206,9 +354,9 @@ mod tests {
                 current_size: size,
                 prev_size: None,
                 children: vec![],
-                file_count: 0,
-                folder_count: 0,
-                modified: None,
+                file_count: 42,
+                folder_count: 5,
+                modified: Some("2026-03-10T12:00:00Z".into()),
             },
             depth: 0,
             expanded: false,
@@ -227,7 +375,7 @@ mod tests {
                 children: vec![],
                 file_count: 0,
                 folder_count: 0,
-                modified: None,
+                modified: Some("2026-03-10T08:30:00Z".into()),
             },
             depth: 0,
             expanded: false,
@@ -292,5 +440,31 @@ mod tests {
         ];
         view.update(cx, |v, cx| v.set_nodes(nodes, cx));
         cx.run_until_parked();
+    }
+
+    #[gpui::test]
+    fn columns_show_prev_size_when_comparing(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, cx| TreeView::new(cx));
+        let node = UiNode {
+            fs_node: FsNode {
+                name: "docs".into(),
+                path: PathBuf::from("C:/docs"),
+                is_dir: true,
+                current_size: 2000,
+                prev_size: Some(1000),
+                children: vec![],
+                file_count: 10,
+                folder_count: 3,
+                modified: Some("2026-03-10T12:00:00Z".into()),
+            },
+            depth: 0,
+            expanded: false,
+            scan_progress: 0.8,
+        };
+        view.update(cx, |v, cx| v.set_nodes(vec![node], cx));
+        cx.run_until_parked();
+        view.read_with(cx, |v, _| {
+            assert_eq!(v.nodes[0].fs_node.prev_size, Some(1000));
+        });
     }
 }

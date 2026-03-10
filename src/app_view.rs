@@ -3,13 +3,13 @@ use std::path::PathBuf;
 
 use gpui::prelude::*;
 use gpui::{
-    div, px, rgb, App, AsyncApp, ClickEvent, Context, Entity, Focusable, FocusHandle, IntoElement,
-    Render, WeakEntity, Window,
+    div, px, relative, rgb, App, AsyncApp, ClickEvent, Context, Entity, Focusable, FocusHandle,
+    IntoElement, Render, WeakEntity, Window,
 };
 use gpui_component::TitleBar;
 
 use crate::drive_selector::{DriveSelector, DriveSelectorEvent};
-use crate::models::{DbNode, DriveInfo, FsNode};
+use crate::models::{format_number, format_size, DbNode, DriveInfo, FsNode};
 use crate::persistence;
 use crate::scan_history::{ScanHistory, ScanHistoryEvent};
 use crate::scanner;
@@ -21,10 +21,13 @@ use crate::tree_view::{TreeView, TreeViewEvent};
 
 pub struct AppView {
     db: rusqlite::Connection,
+    drives: Vec<DriveInfo>,
     selected_drive: Option<String>,
     expanded_paths: HashSet<PathBuf>,
     current_scan_root: Option<FsNode>,
     scanning: bool,
+    scan_item_count: Option<u64>,
+    last_scan_time: Option<String>,
 
     drive_selector: Entity<DriveSelector>,
     scan_history: Entity<ScanHistory>,
@@ -33,10 +36,10 @@ pub struct AppView {
 }
 
 impl AppView {
-    pub fn new(cx: &mut Context<Self>) -> Self {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let db = persistence::open_db().expect("failed to open database");
 
-        let drive_selector = cx.new(DriveSelector::new);
+        let drive_selector = cx.new(|cx| DriveSelector::new(window, cx));
         let scan_history = cx.new(ScanHistory::new);
         let tree_view = cx.new(TreeView::new);
 
@@ -64,10 +67,13 @@ impl AppView {
 
         Self {
             db,
+            drives: Vec::new(),
             selected_drive: None,
             expanded_paths: HashSet::new(),
             current_scan_root: None,
             scanning: false,
+            scan_item_count: None,
+            last_scan_time: None,
             drive_selector,
             scan_history,
             tree_view,
@@ -76,9 +82,24 @@ impl AppView {
     }
 
     /// Populate the drive list in the DriveSelector panel.
-    pub fn set_drives(&mut self, drives: Vec<DriveInfo>, cx: &mut Context<Self>) {
+    pub fn set_drives(
+        &mut self,
+        drives: Vec<DriveInfo>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let ds = self.drive_selector.clone();
-        ds.update(cx, |v, cx| v.set_drives(drives, cx));
+        ds.update(cx, |v, cx| v.set_drives(drives.clone(), window, cx));
+        self.drives = drives;
+    }
+
+    // -----------------------------------------------------------------------
+    // Helpers for selected drive info
+    // -----------------------------------------------------------------------
+
+    fn selected_drive_info(&self) -> Option<&DriveInfo> {
+        let drive = self.selected_drive.as_ref()?;
+        self.drives.iter().find(|d| &d.name == drive)
     }
 
     // -----------------------------------------------------------------------
@@ -89,6 +110,8 @@ impl AppView {
         self.selected_drive = Some(drive.clone());
         self.expanded_paths.clear();
         self.current_scan_root = None;
+        self.scan_item_count = None;
+        self.last_scan_time = None;
 
         if let Ok(scans) = persistence::get_scans_for_drive(&self.db, &drive) {
             let sh = self.scan_history.clone();
@@ -120,7 +143,9 @@ impl AppView {
         let mut roots = vec![root];
         scanner::merge_baseline(&mut roots, &baseline);
 
-        self.current_scan_root = Some(roots.remove(0));
+        let root = roots.remove(0);
+        self.scan_item_count = Some(root.file_count + root.folder_count);
+        self.current_scan_root = Some(root);
         self.expanded_paths.clear();
         self.rebuild_tree(cx);
     }
@@ -172,10 +197,13 @@ impl AppView {
         cx.spawn(async move |this: WeakEntity<AppView>, cx: &mut AsyncApp| {
             let root = task.await;
             this.update(cx, |view: &mut AppView, cx| {
+                view.scan_item_count = Some(root.file_count + root.folder_count);
                 if persistence::save_scan(&view.db, &drive_for_save, &root).is_ok() {
                     if let Ok(scans) =
                         persistence::get_scans_for_drive(&view.db, &drive_for_save)
                     {
+                        view.last_scan_time =
+                            scans.first().map(|s| s.scanned_at.clone());
                         let sh = view.scan_history.clone();
                         sh.update(cx, |v: &mut ScanHistory, cx| v.set_scans(scans, cx));
                     }
@@ -273,6 +301,68 @@ impl Render for AppView {
         let has_drive = self.selected_drive.is_some();
         let scan_label: &str = if scanning { "Scanning…" } else { "Scan Now" };
 
+        let dim = rgb(0x6c7086);
+        let normal = rgb(0xcdd6f4);
+        let border = rgb(0x313244);
+
+        // Drive usage info for toolbar
+        let drive_info = self.selected_drive_info().cloned();
+        let usage_bar = if let Some(ref di) = drive_info {
+            let used = di.total_space.saturating_sub(di.available_space);
+            let pct = if di.total_space > 0 {
+                used as f32 / di.total_space as f32
+            } else {
+                0.0
+            };
+            let label = format!(
+                "{} / {} used",
+                format_size(used),
+                format_size(di.total_space)
+            );
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(
+                    div()
+                        .w(px(120.))
+                        .h(px(10.))
+                        .rounded_sm()
+                        .bg(rgb(0x313244))
+                        .child(
+                            div()
+                                .h_full()
+                                .rounded_sm()
+                                .w(relative(pct))
+                                .bg(if pct > 0.9 {
+                                    rgb(0xef4444)
+                                } else if pct > 0.75 {
+                                    rgb(0xf97316)
+                                } else {
+                                    rgb(0x89b4fa)
+                                }),
+                        ),
+                )
+                .child(div().text_xs().text_color(dim).child(label))
+        } else {
+            div()
+        };
+
+        // Status bar content
+        let status_items = self
+            .scan_item_count
+            .map(|c| format!("{} items", format_number(c)))
+            .unwrap_or_default();
+        let status_drive = self
+            .selected_drive
+            .clone()
+            .unwrap_or_default();
+        let status_time = self
+            .last_scan_time
+            .clone()
+            .map(|t| format!("Last scan: {t}"))
+            .unwrap_or_default();
+
         div()
             .flex()
             .flex_col()
@@ -289,7 +379,7 @@ impl Render for AppView {
                         .child(
                             div()
                                 .text_sm()
-                                .text_color(rgb(0xcdd6f4))
+                                .text_color(normal)
                                 .child("Storage Wars"),
                         ),
                 ),
@@ -305,7 +395,7 @@ impl Render for AppView {
                     .h(px(44.))
                     .bg(rgb(0x181825))
                     .border_b_1()
-                    .border_color(rgb(0x313244))
+                    .border_color(border)
                     .child(self.drive_selector.clone())
                     .child(
                         div()
@@ -319,14 +409,15 @@ impl Render for AppView {
                             .text_color(if has_drive && !scanning {
                                 rgb(0x1e1e2e)
                             } else {
-                                rgb(0x6c7086)
+                                dim
                             })
                             .text_sm()
                             .child(scan_label)
                             .on_click(cx.listener(|this, _: &ClickEvent, _window, cx| {
                                 this.start_scan(cx);
                             })),
-                    ),
+                    )
+                    .child(usage_bar),
             )
             // Row 3: Main content
             .child(
@@ -334,10 +425,34 @@ impl Render for AppView {
                     .flex()
                     .flex_grow()
                     .min_h_0()
-                    // Left: scan history sidebar
-                    .child(self.scan_history.clone())
-                    // Right: tree view
+                    // Left: scan history sidebar (280px)
+                    .child(
+                        div()
+                            .w(px(280.))
+                            .flex_shrink_0()
+                            .border_r_1()
+                            .border_color(border)
+                            .child(self.scan_history.clone()),
+                    )
+                    // Right: tree view (flex-grow)
                     .child(self.tree_view.clone()),
+            )
+            // Row 4: Status bar
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .px_4()
+                    .h(px(24.))
+                    .bg(rgb(0x181825))
+                    .border_t_1()
+                    .border_color(border)
+                    .text_xs()
+                    .text_color(dim)
+                    .child(div().child(status_items))
+                    .child(div().child(status_drive))
+                    .child(div().child(status_time)),
             )
     }
 }
