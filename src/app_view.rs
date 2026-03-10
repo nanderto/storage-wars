@@ -276,7 +276,7 @@ impl AppView {
         self.rebuild_tree(cx);
 
         // Create channel and spawn scanner thread
-        let (tx, rx) = async_channel::bounded(32);
+        let (tx, rx) = async_channel::bounded(256);
         let num_workers = std::thread::available_parallelism()
             .map(|n| n.get().min(8))
             .unwrap_or(4);
@@ -286,14 +286,12 @@ impl AppView {
             scanner::scan_dir_incremental(scan_root, tx, cancel, num_workers);
         });
 
-        // Channel-driven UI loop.  The bounded channel (capacity 32)
-        // creates natural backpressure: scanners block when the channel
-        // is full, so the UI controls the pace.  Each iteration we drain
-        // the channel, process the batch, call cx.notify(), then loop
-        // back to recv().  Because we drained the channel, recv() returns
-        // Pending (channel empty), which yields to gpui — it renders
-        // the frame, then polls us again once the scanners refill.
+        // Channel-driven UI loop.  Each iteration we drain at most 50
+        // messages, process them, then yield to gpui via a 1ms timer.
+        // The bounded channel (capacity 256) gives scanners room to work
+        // ahead while the batch limit keeps each frame's cost bounded.
         let drive_for_save = drive.clone();
+        let bg = cx.background_executor().clone();
         cx.spawn(async move |this: WeakEntity<AppView>, cx: &mut AsyncApp| {
             loop {
                 // Wait (async) until a message arrives — yields to gpui
@@ -303,11 +301,13 @@ impl AppView {
                     Err(_) => break, // channel closed
                 };
 
-                // Drain the rest of the channel.  Because capacity is 32,
-                // this is at most 31 more messages — cheap to process.
+                // Drain up to 50 messages per batch to bound per-frame cost.
                 let mut batch = vec![first];
-                while let Ok(msg) = rx.try_recv() {
-                    batch.push(msg);
+                while batch.len() < 50 {
+                    match rx.try_recv() {
+                        Ok(msg) => batch.push(msg),
+                        Err(_) => break,
+                    }
                 }
 
                 let mut got_complete = false;
@@ -318,23 +318,23 @@ impl AppView {
                     };
 
                     let mut visible_changed = false;
-                    for msg in &batch {
+                    for msg in batch {
                         match msg {
                             scanner::ScanMessage::DirScanned {
                                 parent_path,
                                 children,
                             } => {
-                                scanner::insert_children(
-                                    root,
-                                    parent_path,
-                                    children.clone(),
-                                );
-                                view.dirs_scanned += 1;
                                 if view.expanded_paths.contains(
                                     parent_path.as_path(),
                                 ) {
                                     visible_changed = true;
                                 }
+                                scanner::insert_children(
+                                    root,
+                                    &parent_path,
+                                    children,
+                                );
+                                view.dirs_scanned += 1;
                             }
                             scanner::ScanMessage::ScanError { .. } => {}
                             scanner::ScanMessage::Complete => {
@@ -410,6 +410,9 @@ impl AppView {
                     .ok();
                     break;
                 }
+
+                // Yield to gpui so it can render and handle input.
+                bg.timer(std::time::Duration::from_millis(1)).await;
             }
         })
         .detach();
