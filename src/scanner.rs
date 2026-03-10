@@ -1,8 +1,31 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
 
 use crate::models::{DbNode, FsNode, UiNode};
+
+// ---------------------------------------------------------------------------
+// Incremental scan messages
+// ---------------------------------------------------------------------------
+
+/// Messages sent from scanner worker threads to the UI thread.
+#[derive(Debug)]
+pub enum ScanMessage {
+    /// A directory was read; here are its immediate children.
+    DirScanned {
+        parent_path: PathBuf,
+        children: Vec<FsNode>,
+    },
+    /// A directory could not be read.
+    ScanError {
+        path: PathBuf,
+        error: String,
+    },
+    /// All workers finished — the scan is complete.
+    Complete,
+}
 
 /// Format a `SystemTime` as an ISO 8601 string (UTC, second precision).
 fn format_system_time(t: std::time::SystemTime) -> String {
@@ -80,6 +103,201 @@ pub fn scan_dir_sync(root: &Path) -> FsNode {
         folder_count,
         modified,
     }
+}
+
+// ---------------------------------------------------------------------------
+// Incremental parallel scanner
+// ---------------------------------------------------------------------------
+
+/// Read ONE directory's immediate contents without recursing.
+/// Subdirectories get `current_size: 0` and empty `children` (they'll be scanned later).
+pub fn read_dir_immediate(dir: &Path) -> std::io::Result<Vec<FsNode>> {
+    let mut children = Vec::new();
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.to_string_lossy().into_owned());
+
+        let meta = fs::metadata(&path);
+        let is_dir = meta.as_ref().map(|m| m.is_dir()).unwrap_or(false);
+        let modified = meta
+            .as_ref()
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .map(format_system_time);
+
+        if is_dir {
+            children.push(FsNode {
+                name,
+                path,
+                is_dir: true,
+                current_size: 0,
+                prev_size: None,
+                children: vec![],
+                file_count: 0,
+                folder_count: 0,
+                modified,
+            });
+        } else {
+            let size = meta.map(|m| m.len()).unwrap_or(0);
+            children.push(FsNode {
+                name,
+                path,
+                is_dir: false,
+                current_size: size,
+                prev_size: None,
+                children: vec![],
+                file_count: 0,
+                folder_count: 0,
+                modified,
+            });
+        }
+    }
+    Ok(children)
+}
+
+/// Run an incremental parallel scan of `root`, sending results through `tx`.
+///
+/// Spawns `num_workers` threads that pull directories from a shared work queue.
+/// Each worker reads one directory, sends its children via the channel, and
+/// pushes subdirectories back onto the queue.
+///
+/// Set `cancelled` to `true` to stop workers after their current directory.
+/// Sends `ScanMessage::Complete` after all workers have finished.
+pub fn scan_dir_incremental(
+    root: PathBuf,
+    tx: async_channel::Sender<ScanMessage>,
+    cancelled: Arc<AtomicBool>,
+    num_workers: usize,
+) {
+    let queue = Arc::new(Mutex::new(VecDeque::from([root])));
+    let active_workers = Arc::new(AtomicUsize::new(0));
+    let condvar = Arc::new(Condvar::new());
+
+    std::thread::scope(|s| {
+        for _ in 0..num_workers {
+            let queue = Arc::clone(&queue);
+            let active_workers = Arc::clone(&active_workers);
+            let condvar = Arc::clone(&condvar);
+            let cancelled = Arc::clone(&cancelled);
+            let tx = tx.clone();
+
+            s.spawn(move || {
+                loop {
+                    if cancelled.load(Ordering::Relaxed) {
+                        return;
+                    }
+
+                    // Try to get work from the queue
+                    let dir = {
+                        let mut q = queue.lock().unwrap();
+                        loop {
+                            if cancelled.load(Ordering::Relaxed) {
+                                return;
+                            }
+                            if let Some(dir) = q.pop_front() {
+                                active_workers.fetch_add(1, Ordering::SeqCst);
+                                break Some(dir);
+                            }
+                            // Queue is empty — are other workers still producing?
+                            if active_workers.load(Ordering::SeqCst) == 0 {
+                                // Nobody active, no work left — we're done
+                                break None;
+                            }
+                            // Wait for new work or completion
+                            q = condvar.wait(q).unwrap();
+                        }
+                    };
+
+                    let dir = match dir {
+                        Some(d) => d,
+                        None => {
+                            // Wake all waiters so they can exit too
+                            condvar.notify_all();
+                            return;
+                        }
+                    };
+
+                    // Read this directory
+                    match read_dir_immediate(&dir) {
+                        Ok(children) => {
+                            // Push subdirectories onto the work queue
+                            {
+                                let mut q = queue.lock().unwrap();
+                                for child in &children {
+                                    if child.is_dir {
+                                        q.push_back(child.path.clone());
+                                    }
+                                }
+                            }
+                            // Notify waiters that new work may be available
+                            condvar.notify_all();
+
+                            // Send results to UI
+                            let _ = tx.send_blocking(ScanMessage::DirScanned {
+                                parent_path: dir,
+                                children,
+                            });
+                        }
+                        Err(e) => {
+                            let _ = tx.send_blocking(ScanMessage::ScanError {
+                                path: dir,
+                                error: e.to_string(),
+                            });
+                        }
+                    }
+
+                    active_workers.fetch_sub(1, Ordering::SeqCst);
+                    condvar.notify_all();
+                }
+            });
+        }
+    });
+
+    // All workers have joined — signal completion
+    let _ = tx.send_blocking(ScanMessage::Complete);
+}
+
+/// Insert `children` into the tree at `parent_path`.
+/// Returns `true` if the parent was found and children were inserted.
+pub fn insert_children(root: &mut FsNode, parent_path: &Path, children: Vec<FsNode>) -> bool {
+    if root.path == parent_path {
+        root.children = children;
+        return true;
+    }
+    // Only descend into the one child whose path is a prefix of the target
+    for child in &mut root.children {
+        if child.is_dir && parent_path.starts_with(&child.path) {
+            return insert_children(child, parent_path, children);
+        }
+    }
+    false
+}
+
+/// Recalculate `current_size`, `file_count`, and `folder_count` bottom-up.
+pub fn recalculate_sizes(node: &mut FsNode) {
+    if !node.is_dir {
+        return;
+    }
+
+    for child in &mut node.children {
+        recalculate_sizes(child);
+    }
+
+    node.current_size = node.children.iter().map(|c| c.current_size).sum();
+    node.file_count = node
+        .children
+        .iter()
+        .map(|c| if c.is_dir { c.file_count } else { 1 })
+        .sum();
+    node.folder_count = node
+        .children
+        .iter()
+        .map(|c| if c.is_dir { 1 + c.folder_count } else { 0 })
+        .sum();
 }
 
 // ---------------------------------------------------------------------------
@@ -482,5 +700,287 @@ mod tests {
         // Timestamps should be ISO 8601 format
         let ts = file_node.modified.as_ref().unwrap();
         assert!(ts.contains('T') && ts.ends_with('Z'), "timestamp should be ISO 8601: {ts}");
+    }
+
+    // -----------------------------------------------------------------------
+    // read_dir_immediate tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn read_dir_immediate_files_and_dirs() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("a.txt"), vec![0u8; 100]).unwrap();
+        std::fs::create_dir(root.join("sub")).unwrap();
+
+        let children = read_dir_immediate(root).unwrap();
+        assert_eq!(children.len(), 2);
+
+        let file = children.iter().find(|c| c.name == "a.txt").unwrap();
+        assert!(!file.is_dir);
+        assert_eq!(file.current_size, 100);
+
+        let sub = children.iter().find(|c| c.name == "sub").unwrap();
+        assert!(sub.is_dir);
+        assert_eq!(sub.current_size, 0, "subdirs start at size 0");
+        assert!(sub.children.is_empty(), "subdirs have no children yet");
+    }
+
+    #[test]
+    fn read_dir_immediate_empty_dir() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let children = read_dir_immediate(dir.path()).unwrap();
+        assert!(children.is_empty());
+    }
+
+    #[test]
+    fn read_dir_immediate_nonexistent_path() {
+        let result = read_dir_immediate(Path::new("/nonexistent/path/that/does/not/exist"));
+        assert!(result.is_err());
+    }
+
+    // -----------------------------------------------------------------------
+    // insert_children tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn insert_children_at_root() {
+        let mut root = FsNode {
+            name: "root".into(),
+            path: PathBuf::from("/root"),
+            is_dir: true,
+            current_size: 0,
+            prev_size: None,
+            children: vec![],
+            file_count: 0,
+            folder_count: 0,
+            modified: None,
+        };
+
+        let new_children = vec![FsNode {
+            name: "file.txt".into(),
+            path: PathBuf::from("/root/file.txt"),
+            is_dir: false,
+            current_size: 42,
+            prev_size: None,
+            children: vec![],
+            file_count: 0,
+            folder_count: 0,
+            modified: None,
+        }];
+
+        assert!(insert_children(&mut root, Path::new("/root"), new_children));
+        assert_eq!(root.children.len(), 1);
+        assert_eq!(root.children[0].name, "file.txt");
+    }
+
+    #[test]
+    fn insert_children_nested() {
+        let mut root = FsNode {
+            name: "root".into(),
+            path: PathBuf::from("/root"),
+            is_dir: true,
+            current_size: 0,
+            prev_size: None,
+            children: vec![FsNode {
+                name: "sub".into(),
+                path: PathBuf::from("/root/sub"),
+                is_dir: true,
+                current_size: 0,
+                prev_size: None,
+                children: vec![],
+                file_count: 0,
+                folder_count: 0,
+                modified: None,
+            }],
+            file_count: 0,
+            folder_count: 0,
+            modified: None,
+        };
+
+        let new_children = vec![FsNode {
+            name: "deep.txt".into(),
+            path: PathBuf::from("/root/sub/deep.txt"),
+            is_dir: false,
+            current_size: 99,
+            prev_size: None,
+            children: vec![],
+            file_count: 0,
+            folder_count: 0,
+            modified: None,
+        }];
+
+        assert!(insert_children(&mut root, Path::new("/root/sub"), new_children));
+        assert_eq!(root.children[0].children.len(), 1);
+        assert_eq!(root.children[0].children[0].name, "deep.txt");
+    }
+
+    #[test]
+    fn insert_children_missing_parent() {
+        let mut root = FsNode {
+            name: "root".into(),
+            path: PathBuf::from("/root"),
+            is_dir: true,
+            current_size: 0,
+            prev_size: None,
+            children: vec![],
+            file_count: 0,
+            folder_count: 0,
+            modified: None,
+        };
+
+        let result = insert_children(&mut root, Path::new("/nonexistent"), vec![]);
+        assert!(!result, "should return false for missing parent");
+    }
+
+    // -----------------------------------------------------------------------
+    // recalculate_sizes tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn recalculate_sizes_bottom_up() {
+        let mut root = FsNode {
+            name: "root".into(),
+            path: PathBuf::from("/root"),
+            is_dir: true,
+            current_size: 0,
+            prev_size: None,
+            children: vec![
+                FsNode {
+                    name: "a.txt".into(),
+                    path: PathBuf::from("/root/a.txt"),
+                    is_dir: false,
+                    current_size: 100,
+                    prev_size: None,
+                    children: vec![],
+                    file_count: 0,
+                    folder_count: 0,
+                    modified: None,
+                },
+                FsNode {
+                    name: "sub".into(),
+                    path: PathBuf::from("/root/sub"),
+                    is_dir: true,
+                    current_size: 0,
+                    prev_size: None,
+                    children: vec![FsNode {
+                        name: "b.txt".into(),
+                        path: PathBuf::from("/root/sub/b.txt"),
+                        is_dir: false,
+                        current_size: 200,
+                        prev_size: None,
+                        children: vec![],
+                        file_count: 0,
+                        folder_count: 0,
+                        modified: None,
+                    }],
+                    file_count: 0,
+                    folder_count: 0,
+                    modified: None,
+                },
+            ],
+            file_count: 0,
+            folder_count: 0,
+            modified: None,
+        };
+
+        recalculate_sizes(&mut root);
+
+        // sub: size=200, files=1, folders=0
+        let sub = root.children.iter().find(|c| c.name == "sub").unwrap();
+        assert_eq!(sub.current_size, 200);
+        assert_eq!(sub.file_count, 1);
+        assert_eq!(sub.folder_count, 0);
+
+        // root: size=300, files=2, folders=1
+        assert_eq!(root.current_size, 300);
+        assert_eq!(root.file_count, 2);
+        assert_eq!(root.folder_count, 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // scan_dir_incremental tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn scan_dir_incremental_discovers_all_files() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+
+        std::fs::write(root.join("a.txt"), vec![0u8; 100]).unwrap();
+        let sub = root.join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join("b.txt"), vec![0u8; 200]).unwrap();
+
+        let (tx, rx) = async_channel::bounded(256);
+        let cancelled = Arc::new(AtomicBool::new(false));
+
+        scan_dir_incremental(root.to_path_buf(), tx, cancelled, 2);
+
+        // Collect all messages
+        let mut dir_scanned_count = 0;
+        let mut got_complete = false;
+        let mut all_children: Vec<String> = Vec::new();
+
+        loop {
+            match rx.try_recv() {
+                Ok(ScanMessage::DirScanned { children, .. }) => {
+                    dir_scanned_count += 1;
+                    for c in &children {
+                        all_children.push(c.name.clone());
+                    }
+                }
+                Ok(ScanMessage::ScanError { .. }) => {}
+                Ok(ScanMessage::Complete) => {
+                    got_complete = true;
+                    break;
+                }
+                Err(_) => break,
+            }
+        }
+
+        assert!(got_complete, "should receive Complete message");
+        assert!(dir_scanned_count >= 2, "should scan at least root + sub");
+        assert!(all_children.contains(&"a.txt".to_string()));
+        assert!(all_children.contains(&"b.txt".to_string()));
+        assert!(all_children.contains(&"sub".to_string()));
+    }
+
+    #[test]
+    fn scan_dir_incremental_cancellation() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+
+        // Create a structure with enough depth to give us time to cancel
+        let mut path = root.to_path_buf();
+        for i in 0..10 {
+            path = path.join(format!("dir{i}"));
+            std::fs::create_dir(&path).unwrap();
+            std::fs::write(path.join("file.txt"), b"data").unwrap();
+        }
+
+        let (tx, rx) = async_channel::bounded(256);
+        let cancelled = Arc::new(AtomicBool::new(true)); // Cancel immediately
+
+        scan_dir_incremental(root.to_path_buf(), tx, cancelled, 2);
+
+        // Should still get Complete even when cancelled
+        let mut got_complete = false;
+        let mut dir_count = 0;
+        loop {
+            match rx.try_recv() {
+                Ok(ScanMessage::DirScanned { .. }) => dir_count += 1,
+                Ok(ScanMessage::ScanError { .. }) => {}
+                Ok(ScanMessage::Complete) => {
+                    got_complete = true;
+                    break;
+                }
+                Err(_) => break,
+            }
+        }
+
+        assert!(got_complete, "should receive Complete even when cancelled");
+        // With immediate cancellation, should scan very few (possibly zero) dirs
+        assert!(dir_count <= 2, "cancelled scan should process very few dirs, got {dir_count}");
     }
 }
