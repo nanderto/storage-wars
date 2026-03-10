@@ -6,7 +6,7 @@ use gpui::{
     div, px, relative, rgb, App, AsyncApp, ClickEvent, Context, Entity, Focusable, FocusHandle,
     IntoElement, Render, SharedString, WeakEntity, Window,
 };
-use gpui_component::TitleBar;
+use gpui::WindowControlArea;
 
 use crate::drive_selector::{DriveSelector, DriveSelectorEvent};
 use crate::models::{format_number, format_size, DbNode, DriveInfo, FsNode};
@@ -407,31 +407,104 @@ impl Render for AppView {
             .flex_col()
             .size_full()
             .bg(rgb(0x1e1e2e))
-            // Row 1: Title bar — use TitleBar's built-in window controls
+            // Row 1: Custom title bar
             .child(
-                TitleBar::new().bg(rgb(0x181825)).border_color(border)
+                div()
+                    .id("title-bar")
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .h(px(34.))
+                    .px_3()
+                    .bg(rgb(0x181825))
+                    .border_b_1()
+                    .border_color(border)
+                    // Left: app title (drag area)
                     .child(
                         div()
-                            .text_sm()
-                            .font_weight(gpui::FontWeight::BOLD)
-                            .text_color(accent)
-                            .child("Storage Wars"),
-                    )
-                    .child(div().flex_grow())
-                    // Gear icon for settings (placeholder) — right side, before window controls
-                    .child(
-                        div()
-                            .id("btn-settings")
                             .flex()
-                            .justify_center()
                             .items_center()
-                            .w(px(34.))
+                            .flex_grow()
                             .h_full()
-                            .cursor_pointer()
-                            .hover(|s| s.bg(rgb(0x313244)))
-                            .text_color(normal)
-                            .text_sm()
-                            .child("\u{2699}"),
+                            .window_control_area(WindowControlArea::Drag)
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(gpui::FontWeight::BOLD)
+                                    .text_color(accent)
+                                    .child("Storage Wars"),
+                            ),
+                    )
+                    // Right: gear + window controls
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .h_full()
+                            .flex_shrink_0()
+                            // Gear (settings placeholder)
+                            .child(
+                                div()
+                                    .id("btn-settings")
+                                    .flex()
+                                    .justify_center()
+                                    .items_center()
+                                    .w(px(40.))
+                                    .h_full()
+                                    .cursor_pointer()
+                                    .hover(|s| s.bg(rgb(0x313244)))
+                                    .text_color(normal)
+                                    .text_sm()
+                                    .child("\u{2699}"),
+                            )
+                            // Minimize
+                            .child(
+                                div()
+                                    .id("btn-min")
+                                    .flex()
+                                    .justify_center()
+                                    .items_center()
+                                    .w(px(40.))
+                                    .h_full()
+                                    .cursor_pointer()
+                                    .text_color(normal)
+                                    .hover(|s| s.bg(rgb(0x313244)))
+                                    .text_sm()
+                                    .window_control_area(WindowControlArea::Min)
+                                    .child("\u{2014}"),
+                            )
+                            // Maximize / Restore
+                            .child(
+                                div()
+                                    .id("btn-max")
+                                    .flex()
+                                    .justify_center()
+                                    .items_center()
+                                    .w(px(40.))
+                                    .h_full()
+                                    .cursor_pointer()
+                                    .text_color(normal)
+                                    .hover(|s| s.bg(rgb(0x313244)))
+                                    .text_sm()
+                                    .window_control_area(WindowControlArea::Max)
+                                    .child("\u{25A1}"),
+                            )
+                            // Close
+                            .child(
+                                div()
+                                    .id("btn-close")
+                                    .flex()
+                                    .justify_center()
+                                    .items_center()
+                                    .w(px(40.))
+                                    .h_full()
+                                    .cursor_pointer()
+                                    .text_color(normal)
+                                    .hover(|s| s.bg(rgb(0xe81123)).text_color(rgb(0xffffff)))
+                                    .text_sm()
+                                    .window_control_area(WindowControlArea::Close)
+                                    .child("\u{2715}"),
+                            ),
                     ),
             )
             // Row 2: Toolbar
