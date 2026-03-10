@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use gpui::prelude::*;
 use gpui::{
@@ -286,119 +286,86 @@ impl AppView {
             scanner::scan_dir_incremental(scan_root, tx, cancel, num_workers);
         });
 
-        // Shared buffer: a background thread collects messages from the channel,
-        // and the UI thread periodically drains the buffer to update the tree.
-        // This prevents the UI from freezing when messages arrive faster than
-        // frames can render.
-        let pending = Arc::new(Mutex::new(Vec::<scanner::ScanMessage>::new()));
-        let scan_done = Arc::new(AtomicBool::new(false));
-
-        // Background consumer thread: drain channel into pending buffer
-        {
-            let pending = Arc::clone(&pending);
-            let scan_done = Arc::clone(&scan_done);
-            std::thread::spawn(move || {
-                while let Ok(msg) = rx.recv_blocking() {
-                    let is_complete = matches!(msg, scanner::ScanMessage::Complete);
-                    pending.lock().unwrap().push(msg);
-                    if is_complete {
-                        scan_done.store(true, Ordering::SeqCst);
-                        break;
-                    }
-                }
-            });
-        }
-
-        // UI update loop: collect batches on the background executor (with a
-        // timer so gpui can render between updates), then apply on the UI thread.
+        // Channel-driven UI loop: read messages directly from the channel.
+        // rx.recv().await yields to gpui while the channel is empty, so the
+        // UI stays responsive.  When messages are available we drain a batch
+        // with try_recv(), process it, then loop back to recv().
         let drive_for_save = drive.clone();
-        let bg = cx.background_executor().clone();
         cx.spawn(async move |this: WeakEntity<AppView>, cx: &mut AsyncApp| {
             loop {
-                // Wait ~50ms on the background executor — gives gpui time to
-                // render frames and handle input between updates
-                bg.timer(std::time::Duration::from_millis(50)).await;
-
-                // Drain up to 500 messages per tick to avoid blocking
-                // the UI thread for too long on large scans.
-                let batch: Vec<scanner::ScanMessage> = {
-                    let mut buf = pending.lock().unwrap();
-                    let take = buf.len().min(500);
-                    buf.drain(..take).collect()
+                // Block (async) until the next message arrives.
+                let first = match rx.recv().await {
+                    Ok(msg) => msg,
+                    Err(_) => break, // channel closed
                 };
 
-                let done = scan_done.load(Ordering::SeqCst);
-
-                if batch.is_empty() && !done {
-                    continue;
+                // Drain whatever else is immediately available (limit 500
+                // per batch so each update step stays short).
+                let mut batch = vec![first];
+                while batch.len() < 500 {
+                    match rx.try_recv() {
+                        Ok(msg) => batch.push(msg),
+                        Err(_) => break,
+                    }
                 }
 
                 let mut got_complete = false;
-                if !batch.is_empty() {
-                    let result = this.update(cx, |view: &mut AppView, cx| {
-                        let root = match view.current_scan_root.as_mut() {
-                            Some(r) => r,
-                            None => return,
-                        };
+                let result = this.update(cx, |view: &mut AppView, cx| {
+                    let root = match view.current_scan_root.as_mut() {
+                        Some(r) => r,
+                        None => return,
+                    };
 
-                        let mut visible_changed = false;
-                        for msg in &batch {
-                            match msg {
-                                scanner::ScanMessage::DirScanned {
+                    let mut visible_changed = false;
+                    for msg in &batch {
+                        match msg {
+                            scanner::ScanMessage::DirScanned {
+                                parent_path,
+                                children,
+                            } => {
+                                scanner::insert_children(
+                                    root,
                                     parent_path,
-                                    children,
-                                } => {
-                                    scanner::insert_children(
-                                        root,
-                                        parent_path,
-                                        children.clone(),
-                                    );
-                                    view.dirs_scanned += 1;
-                                    // Only need to rebuild the visible tree if
-                                    // an expanded folder received new children.
-                                    if view.expanded_paths.contains(
-                                        parent_path.as_path(),
-                                    ) {
-                                        visible_changed = true;
-                                    }
-                                }
-                                scanner::ScanMessage::ScanError { .. } => {}
-                                scanner::ScanMessage::Complete => {
-                                    got_complete = true;
+                                    children.clone(),
+                                );
+                                view.dirs_scanned += 1;
+                                if view.expanded_paths.contains(
+                                    parent_path.as_path(),
+                                ) {
+                                    visible_changed = true;
                                 }
                             }
+                            scanner::ScanMessage::ScanError { .. } => {}
+                            scanner::ScanMessage::Complete => {
+                                got_complete = true;
+                            }
                         }
-
-                        // Only run the expensive recalculate + rebuild when
-                        // the user can actually see the change (i.e. one of
-                        // the expanded nodes got new children).
-                        if visible_changed {
-                            scanner::recalculate_sizes(root);
-                            view.scan_item_count =
-                                Some(root.file_count + root.folder_count);
-                            view.rebuild_tree(cx);
-                        }
-
-                        // Always update the status text (cheap).
-                        view.scan_status = SharedString::from(format!(
-                            "Scanning… ({} dirs)",
-                            format_number(view.dirs_scanned as u64),
-                        ));
-                        cx.notify();
-                    });
-
-                    if result.is_err() {
-                        break; // View dropped
                     }
+
+                    if visible_changed {
+                        scanner::recalculate_sizes(root);
+                        view.scan_item_count =
+                            Some(root.file_count + root.folder_count);
+                        view.rebuild_tree(cx);
+                    }
+
+                    view.scan_status = SharedString::from(format!(
+                        "Scanning… ({} dirs)",
+                        format_number(view.dirs_scanned as u64),
+                    ));
+                    cx.notify();
+                });
+
+                if result.is_err() {
+                    break; // View dropped
                 }
 
-                if got_complete || (batch.is_empty() && done) {
+                if got_complete {
                     // Finalize: recalculate sizes, save to DB, rebuild tree
                     this.update(cx, |view: &mut AppView, cx| {
                         let was_cancelled =
                             view.scan_cancel.load(Ordering::SeqCst);
 
-                        // Final recalculate for accurate stats
                         if let Some(root) = view.current_scan_root.as_mut() {
                             scanner::recalculate_sizes(root);
                             view.scan_item_count =
@@ -903,13 +870,9 @@ mod tests {
             v.start_scan(cx);
         });
 
-        // Let the scanner threads finish, then advance the simulated clock
-        // so the bg.timer(50ms) in our UI loop can fire, and run all tasks.
+        // Let the scanner threads finish, then run all pending async tasks
         std::thread::sleep(std::time::Duration::from_millis(200));
-        for _ in 0..20 {
-            cx.executor().advance_clock(std::time::Duration::from_millis(60));
-            cx.run_until_parked();
-        }
+        cx.run_until_parked();
 
         // Verify scan completed and tree has children
         view.read_with(cx, |v, _| {
@@ -984,10 +947,7 @@ mod tests {
             v.start_scan(cx);
         });
         std::thread::sleep(std::time::Duration::from_millis(200));
-        for _ in 0..20 {
-            cx.executor().advance_clock(std::time::Duration::from_millis(60));
-            cx.run_until_parked();
-        }
+        cx.run_until_parked();
 
         // Scan should be done — root stays collapsed (not auto-expanded)
         let tree_view = view.read_with(cx, |v, _| v.tree_view.clone());
@@ -1089,12 +1049,9 @@ mod tests {
             let _ = cx; // suppress warning
         });
 
-        // Let consumer thread + scanner finish, advance clock for timer
+        // Let scanner finish, then run all pending async tasks
         std::thread::sleep(std::time::Duration::from_millis(200));
-        for _ in 0..10 {
-            cx.executor().advance_clock(std::time::Duration::from_millis(60));
-            cx.run_until_parked();
-        }
+        cx.run_until_parked();
 
         view.read_with(cx, |v, _| {
             assert!(!v.scanning, "should no longer be scanning after cancel");
