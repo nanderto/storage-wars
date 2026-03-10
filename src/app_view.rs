@@ -287,10 +287,12 @@ impl AppView {
         });
 
         // Channel-driven UI loop: read messages directly from the channel.
-        // rx.recv().await yields to gpui while the channel is empty, so the
-        // UI stays responsive.  When messages are available we drain a batch
-        // with try_recv(), process it, then loop back to recv().
+        // rx.recv().await yields to gpui while the channel is empty.
+        // When messages are available we drain a batch with try_recv(),
+        // process it, then yield back to gpui for one frame so it can
+        // render and handle input before we take the next batch.
         let drive_for_save = drive.clone();
+        let bg = cx.background_executor().clone();
         cx.spawn(async move |this: WeakEntity<AppView>, cx: &mut AsyncApp| {
             loop {
                 // Block (async) until the next message arrives.
@@ -359,6 +361,12 @@ impl AppView {
                 if result.is_err() {
                     break; // View dropped
                 }
+
+                // Yield to gpui so it can render a frame and handle input
+                // before we process the next batch.  Without this, recv()
+                // resolves instantly when the scanner is fast, starving the
+                // render loop.
+                bg.timer(std::time::Duration::from_millis(10)).await;
 
                 if got_complete {
                     // Finalize: recalculate sizes, save to DB, rebuild tree
@@ -870,8 +878,10 @@ mod tests {
             v.start_scan(cx);
         });
 
-        // Let the scanner threads finish, then run all pending async tasks
+        // Let the scanner threads finish, then process all channel messages.
+        // advance_clock unblocks the yield timer between batches.
         std::thread::sleep(std::time::Duration::from_millis(200));
+        cx.executor().advance_clock(std::time::Duration::from_millis(20));
         cx.run_until_parked();
 
         // Verify scan completed and tree has children
@@ -947,6 +957,7 @@ mod tests {
             v.start_scan(cx);
         });
         std::thread::sleep(std::time::Duration::from_millis(200));
+        cx.executor().advance_clock(std::time::Duration::from_millis(20));
         cx.run_until_parked();
 
         // Scan should be done — root stays collapsed (not auto-expanded)
@@ -1049,8 +1060,9 @@ mod tests {
             let _ = cx; // suppress warning
         });
 
-        // Let scanner finish, then run all pending async tasks
+        // Let scanner finish, then process all channel messages
         std::thread::sleep(std::time::Duration::from_millis(200));
+        cx.executor().advance_clock(std::time::Duration::from_millis(20));
         cx.run_until_parked();
 
         view.read_with(cx, |v, _| {
