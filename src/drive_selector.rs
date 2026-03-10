@@ -1,10 +1,33 @@
 use gpui::prelude::*;
 use gpui::{
-    div, px, rgb, App, ClickEvent, Context, EventEmitter, Focusable, FocusHandle,
-    IntoElement, Render, SharedString, Window,
+    App, Context, Entity, EventEmitter, Focusable, FocusHandle, IntoElement, Render, SharedString,
+    Window,
 };
+use gpui_component::select::{Select, SelectEvent, SelectItem, SelectState};
 
 use crate::models::{format_size, DriveInfo};
+
+// ---------------------------------------------------------------------------
+// Drive select item — adapts DriveInfo for the Select widget
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Debug)]
+pub struct DriveSelectItem {
+    pub name: String,
+    pub label: SharedString,
+}
+
+impl SelectItem for DriveSelectItem {
+    type Value = String;
+
+    fn title(&self) -> SharedString {
+        self.label.clone()
+    }
+
+    fn value(&self) -> &String {
+        &self.name
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Events
@@ -23,19 +46,60 @@ impl EventEmitter<DriveSelectorEvent> for DriveSelector {}
 pub struct DriveSelector {
     pub drives: Vec<DriveInfo>,
     pub selected_drive: Option<String>,
+    select_state: Entity<SelectState<Vec<DriveSelectItem>>>,
     focus_handle: FocusHandle,
 }
 
 impl DriveSelector {
-    pub fn new(cx: &mut Context<Self>) -> Self {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let items: Vec<DriveSelectItem> = Vec::new();
+        let select_state = cx.new(|cx| SelectState::new(items, None, window, cx));
+
+        cx.subscribe_in(&select_state, window, |this, _, event, _window, cx| {
+            if let SelectEvent::Confirm(Some(value)) = event {
+                this.selected_drive = Some(value.clone());
+                cx.emit(DriveSelectorEvent::DriveSelected(value.clone()));
+                cx.notify();
+            }
+        })
+        .detach();
+
         Self {
             drives: Vec::new(),
             selected_drive: None,
+            select_state,
             focus_handle: cx.focus_handle(),
         }
     }
 
-    pub fn set_drives(&mut self, drives: Vec<DriveInfo>, cx: &mut Context<Self>) {
+    pub fn set_drives(
+        &mut self,
+        drives: Vec<DriveInfo>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let items: Vec<DriveSelectItem> = drives
+            .iter()
+            .map(|d| {
+                let label = if d.volume_label.is_empty() {
+                    format!("{} — {} free", d.name, format_size(d.available_space))
+                } else {
+                    format!(
+                        "{} [{}] — {} free",
+                        d.name,
+                        d.volume_label,
+                        format_size(d.available_space)
+                    )
+                };
+                DriveSelectItem {
+                    name: d.name.clone(),
+                    label: label.into(),
+                }
+            })
+            .collect();
+
+        self.select_state
+            .update(cx, |state, cx| state.set_items(items, window, cx));
         self.drives = drives;
         cx.notify();
     }
@@ -48,56 +112,8 @@ impl Focusable for DriveSelector {
 }
 
 impl Render for DriveSelector {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let drives = self.drives.clone();
-        let selected = self.selected_drive.clone();
-
-        div()
-            .flex()
-            .flex_col()
-            .w(px(200.))
-            .h_full()
-            .bg(rgb(0x1e1e2e))
-            .border_r_1()
-            .border_color(rgb(0x313244))
-            .child(
-                div()
-                    .px_3()
-                    .py_2()
-                    .text_color(rgb(0xa6adc8))
-                    .text_sm()
-                    .font_weight(gpui::FontWeight::BOLD)
-                    .child("DRIVES"),
-            )
-            .children(drives.into_iter().enumerate().map(|(ix, drive)| {
-                let is_selected = selected.as_deref() == Some(drive.name.as_str());
-                let name = drive.name.clone();
-                let label: SharedString = format!(
-                    "{} — {} free",
-                    drive.name,
-                    format_size(drive.available_space)
-                )
-                .into();
-
-                div()
-                    .id(ix)
-                    .px_3()
-                    .py_2()
-                    .cursor_pointer()
-                    .text_color(if is_selected {
-                        rgb(0xcdd6f4)
-                    } else {
-                        rgb(0xa6adc8)
-                    })
-                    .when(is_selected, |el| el.bg(rgb(0x313244)))
-                    .hover(|s| s.bg(rgb(0x45475a)))
-                    .child(label)
-                    .on_click(cx.listener(move |this, _: &ClickEvent, _window, cx| {
-                        this.selected_drive = Some(name.clone());
-                        cx.emit(DriveSelectorEvent::DriveSelected(name.clone()));
-                        cx.notify();
-                    }))
-            }))
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        Select::new(&self.select_state).placeholder("Select drive…")
     }
 }
 
@@ -109,14 +125,25 @@ mod tests {
 
     fn drives() -> Vec<DriveInfo> {
         vec![
-            DriveInfo { name: "C:".into(), volume_label: "OS".into(), total_space: 500_000, available_space: 100_000 },
-            DriveInfo { name: "D:".into(), volume_label: "Data".into(), total_space: 1_000_000, available_space: 400_000 },
+            DriveInfo {
+                name: "C:".into(),
+                volume_label: "OS".into(),
+                total_space: 500_000,
+                available_space: 100_000,
+            },
+            DriveInfo {
+                name: "D:".into(),
+                volume_label: "Data".into(),
+                total_space: 1_000_000,
+                available_space: 400_000,
+            },
         ]
     }
 
     #[gpui::test]
     fn initial_state_is_empty(cx: &mut gpui::TestAppContext) {
-        let (view, cx) = cx.add_window_view(|_, cx| DriveSelector::new(cx));
+        cx.update(|app| gpui_component::init(app));
+        let (view, cx) = cx.add_window_view(|window, cx| DriveSelector::new(window, cx));
         view.read_with(cx, |v, _| {
             assert!(v.drives.is_empty());
             assert!(v.selected_drive.is_none());
@@ -125,8 +152,9 @@ mod tests {
 
     #[gpui::test]
     fn set_drives_updates_list(cx: &mut gpui::TestAppContext) {
-        let (view, cx) = cx.add_window_view(|_, cx| DriveSelector::new(cx));
-        view.update(cx, |v, cx| v.set_drives(drives(), cx));
+        cx.update(|app| gpui_component::init(app));
+        let (view, cx) = cx.add_window_view(|window, cx| DriveSelector::new(window, cx));
+        view.update_in(cx, |v, window, cx| v.set_drives(drives(), window, cx));
         cx.run_until_parked();
         view.read_with(cx, |v, _| {
             assert_eq!(v.drives.len(), 2);
@@ -137,9 +165,10 @@ mod tests {
 
     #[gpui::test]
     fn selected_drive_can_be_set(cx: &mut gpui::TestAppContext) {
-        let (view, cx) = cx.add_window_view(|_, cx| DriveSelector::new(cx));
-        view.update(cx, |v, cx| {
-            v.set_drives(drives(), cx);
+        cx.update(|app| gpui_component::init(app));
+        let (view, cx) = cx.add_window_view(|window, cx| DriveSelector::new(window, cx));
+        view.update_in(cx, |v, window, cx| {
+            v.set_drives(drives(), window, cx);
             v.selected_drive = Some("C:".into());
             cx.notify();
         });
@@ -151,8 +180,9 @@ mod tests {
 
     #[gpui::test]
     fn drive_selected_emits_event(cx: &mut gpui::TestAppContext) {
-        let (view, cx) = cx.add_window_view(|_, cx| DriveSelector::new(cx));
-        view.update(cx, |v, cx| v.set_drives(drives(), cx));
+        cx.update(|app| gpui_component::init(app));
+        let (view, cx) = cx.add_window_view(|window, cx| DriveSelector::new(window, cx));
+        view.update_in(cx, |v, window, cx| v.set_drives(drives(), window, cx));
 
         let selected: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(vec![]));
         let captured = selected.clone();
@@ -176,9 +206,9 @@ mod tests {
 
     #[gpui::test]
     fn render_does_not_panic(cx: &mut gpui::TestAppContext) {
-        let (view, cx) = cx.add_window_view(|_, cx| DriveSelector::new(cx));
-        view.update(cx, |v, cx| v.set_drives(drives(), cx));
+        cx.update(|app| gpui_component::init(app));
+        let (view, cx) = cx.add_window_view(|window, cx| DriveSelector::new(window, cx));
+        view.update_in(cx, |v, window, cx| v.set_drives(drives(), window, cx));
         cx.run_until_parked();
-        // If we reach here without panicking the render is sound.
     }
 }

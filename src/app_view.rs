@@ -3,12 +3,13 @@ use std::path::PathBuf;
 
 use gpui::prelude::*;
 use gpui::{
-    div, px, rgb, App, AsyncApp, ClickEvent, Context, Entity, Focusable, FocusHandle, IntoElement,
-    Render, WeakEntity, Window,
+    div, px, relative, rgb, App, AsyncApp, ClickEvent, Context, Entity, Focusable, FocusHandle,
+    IntoElement, Render, SharedString, WeakEntity, Window,
 };
+use gpui::WindowControlArea;
 
 use crate::drive_selector::{DriveSelector, DriveSelectorEvent};
-use crate::models::{DbNode, DriveInfo, FsNode};
+use crate::models::{format_number, format_size, DbNode, DriveInfo, FsNode};
 use crate::persistence;
 use crate::scan_history::{ScanHistory, ScanHistoryEvent};
 use crate::scanner;
@@ -20,10 +21,15 @@ use crate::tree_view::{TreeView, TreeViewEvent};
 
 pub struct AppView {
     db: rusqlite::Connection,
+    drives: Vec<DriveInfo>,
     selected_drive: Option<String>,
     expanded_paths: HashSet<PathBuf>,
     current_scan_root: Option<FsNode>,
     scanning: bool,
+    scan_completed: bool,
+    scan_item_count: Option<u64>,
+    last_scan_time: Option<String>,
+    scan_status: SharedString,
 
     drive_selector: Entity<DriveSelector>,
     scan_history: Entity<ScanHistory>,
@@ -32,10 +38,10 @@ pub struct AppView {
 }
 
 impl AppView {
-    pub fn new(cx: &mut Context<Self>) -> Self {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let db = persistence::open_db().expect("failed to open database");
 
-        let drive_selector = cx.new(DriveSelector::new);
+        let drive_selector = cx.new(|cx| DriveSelector::new(window, cx));
         let scan_history = cx.new(ScanHistory::new);
         let tree_view = cx.new(TreeView::new);
 
@@ -63,10 +69,15 @@ impl AppView {
 
         Self {
             db,
+            drives: Vec::new(),
             selected_drive: None,
             expanded_paths: HashSet::new(),
             current_scan_root: None,
             scanning: false,
+            scan_completed: false,
+            scan_item_count: None,
+            last_scan_time: None,
+            scan_status: "Ready".into(),
             drive_selector,
             scan_history,
             tree_view,
@@ -75,9 +86,24 @@ impl AppView {
     }
 
     /// Populate the drive list in the DriveSelector panel.
-    pub fn set_drives(&mut self, drives: Vec<DriveInfo>, cx: &mut Context<Self>) {
+    pub fn set_drives(
+        &mut self,
+        drives: Vec<DriveInfo>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let ds = self.drive_selector.clone();
-        ds.update(cx, |v, cx| v.set_drives(drives, cx));
+        ds.update(cx, |v, cx| v.set_drives(drives.clone(), window, cx));
+        self.drives = drives;
+    }
+
+    // -----------------------------------------------------------------------
+    // Helpers for selected drive info
+    // -----------------------------------------------------------------------
+
+    fn selected_drive_info(&self) -> Option<&DriveInfo> {
+        let drive = self.selected_drive.as_ref()?;
+        self.drives.iter().find(|d| &d.name == drive)
     }
 
     // -----------------------------------------------------------------------
@@ -88,16 +114,45 @@ impl AppView {
         self.selected_drive = Some(drive.clone());
         self.expanded_paths.clear();
         self.current_scan_root = None;
+        self.scan_item_count = None;
+        self.last_scan_time = None;
+        self.scan_completed = false;
 
+        // Load most recent scan for this drive if one exists
         if let Ok(scans) = persistence::get_scans_for_drive(&self.db, &drive) {
             let sh = self.scan_history.clone();
-            sh.update(cx, |v, cx| v.set_scans(scans, cx));
+            sh.update(cx, |v, cx| v.set_scans(scans.clone(), cx));
+
+            // If there's a previous scan, load it into the tree immediately
+            if let Some(latest) = scans.first() {
+                if let Ok(nodes) = persistence::load_scan_tree(&self.db, latest.id) {
+                    if let Some(root) = build_fs_tree(&nodes) {
+                        self.scan_item_count = Some(root.file_count + root.folder_count);
+                        self.last_scan_time = Some(latest.scanned_at.clone());
+                        self.current_scan_root = Some(root);
+                        self.scan_completed = true;
+                        self.scan_status = "Ready".into();
+                        self.rebuild_tree(cx);
+                        return;
+                    }
+                }
+            }
         }
 
-        let tv = self.tree_view.clone();
-        tv.update(cx, |v, cx| v.set_nodes(vec![], cx));
-
-        cx.notify();
+        // No previous scan — show the drive root as a single unexpanded node
+        self.current_scan_root = Some(FsNode {
+            name: format!("{}\\", drive),
+            path: PathBuf::from(format!("{}\\", drive)),
+            is_dir: true,
+            current_size: 0,
+            prev_size: None,
+            children: vec![],
+            file_count: 0,
+            folder_count: 0,
+            modified: None,
+        });
+        self.scan_status = "Ready".into();
+        self.rebuild_tree(cx);
     }
 
     fn on_compare_requested(&mut self, base_id: i64, new_id: i64, cx: &mut Context<Self>) {
@@ -119,7 +174,9 @@ impl AppView {
         let mut roots = vec![root];
         scanner::merge_baseline(&mut roots, &baseline);
 
-        self.current_scan_root = Some(roots.remove(0));
+        let root = roots.remove(0);
+        self.scan_item_count = Some(root.file_count + root.folder_count);
+        self.current_scan_root = Some(root);
         self.expanded_paths.clear();
         self.rebuild_tree(cx);
     }
@@ -158,6 +215,7 @@ impl AppView {
         }
 
         self.scanning = true;
+        self.scan_status = "Scanning…".into();
         cx.notify();
 
         let path = PathBuf::from(format!("{}\\", drive));
@@ -171,10 +229,13 @@ impl AppView {
         cx.spawn(async move |this: WeakEntity<AppView>, cx: &mut AsyncApp| {
             let root = task.await;
             this.update(cx, |view: &mut AppView, cx| {
+                view.scan_item_count = Some(root.file_count + root.folder_count);
                 if persistence::save_scan(&view.db, &drive_for_save, &root).is_ok() {
                     if let Ok(scans) =
                         persistence::get_scans_for_drive(&view.db, &drive_for_save)
                     {
+                        view.last_scan_time =
+                            scans.first().map(|s| s.scanned_at.clone());
                         let sh = view.scan_history.clone();
                         sh.update(cx, |v: &mut ScanHistory, cx| v.set_scans(scans, cx));
                     }
@@ -182,6 +243,8 @@ impl AppView {
                 view.current_scan_root = Some(root);
                 view.expanded_paths.clear();
                 view.scanning = false;
+                view.scan_completed = true;
+                view.scan_status = "Scan complete".into();
                 view.rebuild_tree(cx);
             })
             .ok();
@@ -270,59 +333,314 @@ impl Render for AppView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let scanning = self.scanning;
         let has_drive = self.selected_drive.is_some();
-        let scan_label: &str = if scanning { "Scanning…" } else { "Scan Now" };
+        let scan_label: &str = if scanning { "Scanning…" } else { "Scan" };
+
+        let accent = rgb(0x89b4fa);
+        let dim = rgb(0x6c7086);
+        let normal = rgb(0xcdd6f4);
+        let border = rgb(0x313244);
+
+        // Drive info panel (WizTree-style: Selection, Total Space, Space Used, Space Free)
+        let drive_info = self.selected_drive_info().cloned();
+        let drive_info_panel = if let Some(ref di) = drive_info {
+            let used = di.total_space.saturating_sub(di.available_space);
+            let used_pct = if di.total_space > 0 {
+                used as f64 / di.total_space as f64 * 100.0
+            } else {
+                0.0
+            };
+            let free_pct = 100.0 - used_pct;
+            let selection_label = if di.volume_label.is_empty() {
+                format!("[{}]", di.name)
+            } else {
+                format!("[{}]  {}", di.name, di.volume_label)
+            };
+
+            div()
+                .flex()
+                .flex_col()
+                .gap_0p5()
+                .pl_4()
+                .text_xs()
+                .child(
+                    div().flex().gap_2()
+                        .child(div().w(px(80.)).text_color(dim).child("Selection:"))
+                        .child(div().text_color(normal).font_weight(gpui::FontWeight::BOLD).child(selection_label)),
+                )
+                .child(
+                    div().flex().gap_2()
+                        .child(div().w(px(80.)).text_color(dim).child("Total Space:"))
+                        .child(div().text_color(normal).font_weight(gpui::FontWeight::BOLD).child(format_size(di.total_space))),
+                )
+                .child(
+                    div().flex().gap_2()
+                        .child(div().w(px(80.)).text_color(dim).child("Space Used:"))
+                        .child(div().text_color(normal).font_weight(gpui::FontWeight::BOLD).child(
+                            format!("{}  ({:.1}%)", format_size(used), used_pct)
+                        )),
+                )
+                .child(
+                    div().flex().gap_2()
+                        .child(div().w(px(80.)).text_color(dim).child("Space Free:"))
+                        .child(div().text_color(normal).font_weight(gpui::FontWeight::BOLD).child(
+                            format!("{}  ({:.1}%)", format_size(di.available_space), free_pct)
+                        )),
+                )
+        } else {
+            div()
+        };
+
+        // Status bar content
+        let status_items = self
+            .scan_item_count
+            .map(|c| format!("{} items", format_number(c)))
+            .unwrap_or_default();
+        let status_drive = self
+            .selected_drive
+            .clone()
+            .unwrap_or_default();
+        let status_time = self
+            .last_scan_time
+            .clone()
+            .map(|t| format!("Last scan: {t}"))
+            .unwrap_or_default();
+
+        let scan_status_text = self.scan_status.clone();
 
         div()
             .flex()
-            .w_full()
-            .h_full()
+            .flex_col()
+            .size_full()
             .bg(rgb(0x1e1e2e))
-            // Left panel: drive list
-            .child(self.drive_selector.clone())
-            // Middle panel: scan history
-            .child(self.scan_history.clone())
-            // Right area: toolbar + tree
+            // Row 1: Custom title bar
             .child(
                 div()
+                    .id("title-bar")
                     .flex()
-                    .flex_col()
-                    .flex_grow()
-                    .h_full()
-                    // Toolbar row
+                    .items_center()
+                    .justify_between()
+                    .h(px(34.))
+                    .bg(rgb(0x181825))
+                    .border_b_1()
+                    .border_color(border)
+                    // Left: app title (drag area) — left padding only
                     .child(
                         div()
                             .flex()
                             .items_center()
-                            .gap_3()
-                            .px_4()
-                            .py_2()
-                            .h(px(44.))
-                            .bg(rgb(0x181825))
-                            .border_b_1()
-                            .border_color(rgb(0x313244))
+                            .flex_grow()
+                            .h_full()
+                            .pl_3()
+                            .window_control_area(WindowControlArea::Drag)
                             .child(
                                 div()
-                                    .id("scan-now")
-                                    .px_4()
-                                    .py_1()
-                                    .rounded_md()
-                                    .cursor_pointer()
-                                    .when(has_drive && !scanning, |el| el.bg(rgb(0x89b4fa)))
-                                    .when(!has_drive || scanning, |el| el.bg(rgb(0x313244)))
-                                    .text_color(if has_drive && !scanning {
-                                        rgb(0x1e1e2e)
-                                    } else {
-                                        rgb(0x6c7086)
-                                    })
                                     .text_sm()
-                                    .child(scan_label)
-                                    .on_click(cx.listener(|this, _: &ClickEvent, _window, cx| {
-                                        this.start_scan(cx);
-                                    })),
+                                    .font_weight(gpui::FontWeight::BOLD)
+                                    .text_color(accent)
+                                    .child("Storage Wars"),
                             ),
                     )
-                    // Tree view fills remaining space
+                    // Right: gear + window controls — no right padding, flush to corner
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .h_full()
+                            .flex_shrink_0()
+                            // Gear (settings placeholder)
+                            .child(
+                                div()
+                                    .id("btn-settings")
+                                    .flex()
+                                    .justify_center()
+                                    .items_center()
+                                    .w(px(46.))
+                                    .h_full()
+                                    .cursor_pointer()
+                                    .hover(|s| s.bg(rgb(0x313244)))
+                                    .text_color(normal)
+                                    .text_sm()
+                                    .child("\u{2699}"),
+                            )
+                            // Minimize
+                            .child(
+                                div()
+                                    .id("btn-min")
+                                    .flex()
+                                    .justify_center()
+                                    .items_center()
+                                    .w(px(46.))
+                                    .h_full()
+                                    .cursor_pointer()
+                                    .text_color(normal)
+                                    .hover(|s| s.bg(rgb(0x313244)))
+                                    .text_sm()
+                                    .window_control_area(WindowControlArea::Min)
+                                    .child("\u{2014}"),
+                            )
+                            // Maximize / Restore
+                            .child(
+                                div()
+                                    .id("btn-max")
+                                    .flex()
+                                    .justify_center()
+                                    .items_center()
+                                    .w(px(46.))
+                                    .h_full()
+                                    .cursor_pointer()
+                                    .text_color(normal)
+                                    .hover(|s| s.bg(rgb(0x313244)))
+                                    .text_base()
+                                    .window_control_area(WindowControlArea::Max)
+                                    .child("\u{25FB}"),
+                            )
+                            // Close — flush to top-right corner
+                            .child(
+                                div()
+                                    .id("btn-close")
+                                    .flex()
+                                    .justify_center()
+                                    .items_center()
+                                    .w(px(46.))
+                                    .h_full()
+                                    .cursor_pointer()
+                                    .text_color(normal)
+                                    .hover(|s| s.bg(rgb(0xe81123)).text_color(rgb(0xffffff)))
+                                    .text_sm()
+                                    .window_control_area(WindowControlArea::Close)
+                                    .child("\u{2715}"),
+                            ),
+                    ),
+            )
+            // Row 2: Toolbar
+            .child(
+                div()
+                    .flex()
+                    .items_start()
+                    .px_4()
+                    .py_2()
+                    .bg(rgb(0x181825))
+                    .border_b_1()
+                    .border_color(border)
+                    // Left group: label + dropdown + scan button
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .flex_shrink_0()
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .text_color(dim)
+                                            .child("Select:"),
+                                    )
+                                    .child(
+                                        div()
+                                            .w(px(200.))
+                                            .child(self.drive_selector.clone()),
+                                    )
+                                    .child(
+                                        div()
+                                            .id("scan-now")
+                                            .px_4()
+                                            .py_1()
+                                            .rounded_md()
+                                            .cursor_pointer()
+                                            .when(has_drive && !scanning, |el| {
+                                                el.bg(accent)
+                                            })
+                                            .when(!has_drive || scanning, |el| {
+                                                el.bg(rgb(0x313244))
+                                            })
+                                            .text_color(if has_drive && !scanning {
+                                                rgb(0x1e1e2e)
+                                            } else {
+                                                dim
+                                            })
+                                            .text_sm()
+                                            .child(scan_label)
+                                            .on_click(cx.listener(
+                                                |this, _: &ClickEvent, _window, cx| {
+                                                    this.start_scan(cx);
+                                                },
+                                            )),
+                                    ),
+                            )
+                            // Progress bar — always visible below the controls
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(dim)
+                                            .child(scan_status_text),
+                                    )
+                                    .child(
+                                        div()
+                                            .w(px(200.))
+                                            .h(px(6.))
+                                            .rounded_sm()
+                                            .bg(rgb(0x313244))
+                                            .overflow_hidden()
+                                            .when(scanning, |el| {
+                                                // Indeterminate: fill 40% with animation feel
+                                                el.child(
+                                                    div()
+                                                        .h_full()
+                                                        .w(relative(0.4))
+                                                        .rounded_sm()
+                                                        .bg(accent),
+                                                )
+                                            })
+                                            .when(!scanning && self.scan_completed, |el| {
+                                                // Complete: full bar in accent color
+                                                el.child(
+                                                    div()
+                                                        .h_full()
+                                                        .w_full()
+                                                        .rounded_sm()
+                                                        .bg(accent),
+                                                )
+                                            }),
+                                    ),
+                            ),
+                    )
+                    // Right group: drive info panel
+                    .child(drive_info_panel),
+            )
+            // Row 3: Main content — tree view fills the area
+            .child(
+                div()
+                    .flex()
+                    .flex_grow()
+                    .min_h_0()
                     .child(self.tree_view.clone()),
+            )
+            // Row 4: Status bar
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .px_4()
+                    .h(px(24.))
+                    .bg(rgb(0x181825))
+                    .border_t_1()
+                    .border_color(border)
+                    .text_xs()
+                    .text_color(dim)
+                    .child(div().child(status_items))
+                    .child(div().child(status_drive))
+                    .child(div().child(status_time)),
             )
     }
 }
