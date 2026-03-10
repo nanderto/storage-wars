@@ -409,33 +409,30 @@ impl Render for AppView {
             .bg(rgb(0x1e1e2e))
             // Row 1: Title bar — use TitleBar's built-in window controls
             .child(
-                TitleBar::new().bg(rgb(0x181825)).border_color(border).child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .w_full()
-                        .gap_3()
-                        .child(
-                            div()
-                                .text_sm()
-                                .font_weight(gpui::FontWeight::BOLD)
-                                .text_color(accent)
-                                .child("Storage Wars"),
-                        )
-                        // Gear icon for settings (placeholder)
-                        .child(
-                            div()
-                                .id("btn-settings")
-                                .px_2()
-                                .py_0p5()
-                                .rounded_sm()
-                                .cursor_pointer()
-                                .hover(|s| s.bg(rgb(0x313244)))
-                                .text_color(dim)
-                                .text_sm()
-                                .child("\u{2699}"),
-                        ),
-                ),
+                TitleBar::new().bg(rgb(0x181825)).border_color(border)
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(gpui::FontWeight::BOLD)
+                            .text_color(accent)
+                            .child("Storage Wars"),
+                    )
+                    .child(div().flex_grow())
+                    // Gear icon for settings (placeholder) — right side, before window controls
+                    .child(
+                        div()
+                            .id("btn-settings")
+                            .flex()
+                            .justify_center()
+                            .items_center()
+                            .w(px(34.))
+                            .h_full()
+                            .cursor_pointer()
+                            .hover(|s| s.bg(rgb(0x313244)))
+                            .text_color(normal)
+                            .text_sm()
+                            .child("\u{2699}"),
+                    ),
             )
             // Row 2: Toolbar
             .child(

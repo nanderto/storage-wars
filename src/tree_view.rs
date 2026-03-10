@@ -154,7 +154,10 @@ impl Render for TreeView {
                     } else {
                         "▶ ".into()
                     },
-                    icon: if node.fs_node.is_dir {
+                    icon: if node.depth == 0 && node.fs_node.is_dir {
+                        // Drive root — show drive icon instead of folder
+                        "💾 ".into()
+                    } else if node.fs_node.is_dir {
                         "📁 ".into()
                     } else {
                         "📄 ".into()
