@@ -134,12 +134,11 @@ impl AppView {
         self.last_scan_time = None;
         self.scan_completed = false;
 
-        // Load most recent scan for this drive if one exists
+        // Load scan history sidebar and most recent scan tree if available
         if let Ok(scans) = persistence::get_scans_for_drive(&self.db, &drive) {
             let sh = self.scan_history.clone();
             sh.update(cx, |v, cx| v.set_scans(scans.clone(), cx));
 
-            // If there's a previous scan, load it into the tree immediately
             if let Some(latest) = scans.first() {
                 if let Ok(nodes) = persistence::load_scan_tree(&self.db, latest.id) {
                     if let Some(root) = build_fs_tree(&nodes) {
@@ -155,10 +154,20 @@ impl AppView {
             }
         }
 
-        // No previous scan — show the drive root as a single unexpanded node
+        // No previous scan — show a single collapsed drive node
+        let root_path = self
+            .scan_root_override
+            .clone()
+            .unwrap_or_else(|| PathBuf::from(format!("{}\\", drive)));
+        let display_name = self
+            .scan_root_override
+            .as_ref()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|| format!("{}\\", drive));
+
         self.current_scan_root = Some(FsNode {
-            name: format!("{}\\", drive),
-            path: PathBuf::from(format!("{}\\", drive)),
+            name: display_name,
+            path: root_path,
             is_dir: true,
             current_size: 0,
             prev_size: None,
@@ -934,6 +943,112 @@ mod tests {
             assert!(
                 names.iter().any(|n| *n == "Users"),
                 "tree view should show Users, got: {names:?}"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn expand_folder_shows_only_immediate_children(cx: &mut gpui::TestAppContext) {
+        cx.update(|app| gpui_component::init(app));
+
+        let test_dir = make_test_dir();
+        let test_path = test_dir.path().to_path_buf();
+
+        let db = persistence::open_in_memory().unwrap();
+
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            let mut app = AppView::new_with_db(db, window, cx);
+            app.scan_root_override = Some(test_path.clone());
+            app
+        });
+
+        // 1. Select drive and run a scan to populate the tree
+        view.update(cx, |v, cx| {
+            v.on_drive_selected("C:".to_string(), cx);
+            v.start_scan(cx);
+        });
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        for _ in 0..20 {
+            cx.executor().advance_clock(std::time::Duration::from_millis(60));
+            cx.run_until_parked();
+        }
+
+        // Scan should be done — root is auto-expanded during scan
+        // Collapse everything first to start from a known state
+        view.update(cx, |v, cx| {
+            v.expanded_paths.clear();
+            v.rebuild_tree(cx);
+        });
+        cx.run_until_parked();
+
+        let tree_view = view.read_with(cx, |v, _| v.tree_view.clone());
+
+        // 2. Tree should show only the collapsed root
+        tree_view.read_with(cx, |v, _| {
+            assert_eq!(v.nodes.len(), 1, "should show only the collapsed root");
+            assert!(!v.nodes[0].expanded, "root should be collapsed");
+        });
+
+        // 3. Expand root → only immediate children (Users, Windows)
+        view.update(cx, |v, cx| {
+            v.on_toggle_expand(test_path.clone(), cx);
+        });
+        cx.run_until_parked();
+
+        tree_view.read_with(cx, |v, _| {
+            // root + Users + Windows = 3
+            assert_eq!(
+                v.nodes.len(),
+                3,
+                "root expanded should show root + 2 children, got: {:?}",
+                v.nodes.iter().map(|n| &n.fs_node.name).collect::<Vec<_>>()
+            );
+            assert!(v.nodes[0].expanded, "root should be expanded");
+
+            // Children at depth 1, collapsed
+            for node in &v.nodes[1..] {
+                assert_eq!(node.depth, 1);
+                assert!(!node.expanded);
+            }
+
+            let child_names: Vec<&str> =
+                v.nodes[1..].iter().map(|n| n.fs_node.name.as_str()).collect();
+            assert!(child_names.contains(&"Users"), "got: {child_names:?}");
+            assert!(child_names.contains(&"Windows"), "got: {child_names:?}");
+        });
+
+        // 4. Expand Users → only its immediate children (docs, file.txt)
+        //    NOT docs/readme.txt (docs is still collapsed)
+        let users_path = test_path.join("Users");
+        view.update(cx, |v, cx| {
+            v.on_toggle_expand(users_path, cx);
+        });
+        cx.run_until_parked();
+
+        tree_view.read_with(cx, |v, _| {
+            // root + Users(expanded) + docs + file.txt + Windows = 5
+            assert_eq!(
+                v.nodes.len(),
+                5,
+                "expanding Users should add docs + file.txt, got: {:?}",
+                v.nodes.iter().map(|n| (&n.fs_node.name, n.depth)).collect::<Vec<_>>()
+            );
+
+            let depth2: Vec<&str> = v
+                .nodes
+                .iter()
+                .filter(|n| n.depth == 2)
+                .map(|n| n.fs_node.name.as_str())
+                .collect();
+            assert!(depth2.contains(&"docs"), "got: {depth2:?}");
+            assert!(depth2.contains(&"file.txt"), "got: {depth2:?}");
+
+            // readme.txt must NOT be visible — docs is collapsed
+            let all_names: Vec<&str> =
+                v.nodes.iter().map(|n| n.fs_node.name.as_str()).collect();
+            assert!(
+                !all_names.contains(&"readme.txt"),
+                "readme.txt should not be visible — docs is still collapsed"
             );
         });
     }
