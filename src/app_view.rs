@@ -26,6 +26,7 @@ pub struct AppView {
     expanded_paths: HashSet<PathBuf>,
     current_scan_root: Option<FsNode>,
     scanning: bool,
+    scan_completed: bool,
     scan_item_count: Option<u64>,
     last_scan_time: Option<String>,
     scan_status: SharedString,
@@ -73,6 +74,7 @@ impl AppView {
             expanded_paths: HashSet::new(),
             current_scan_root: None,
             scanning: false,
+            scan_completed: false,
             scan_item_count: None,
             last_scan_time: None,
             scan_status: "Ready".into(),
@@ -114,6 +116,7 @@ impl AppView {
         self.current_scan_root = None;
         self.scan_item_count = None;
         self.last_scan_time = None;
+        self.scan_completed = false;
 
         // Load most recent scan for this drive if one exists
         if let Ok(scans) = persistence::get_scans_for_drive(&self.db, &drive) {
@@ -127,6 +130,7 @@ impl AppView {
                         self.scan_item_count = Some(root.file_count + root.folder_count);
                         self.last_scan_time = Some(latest.scanned_at.clone());
                         self.current_scan_root = Some(root);
+                        self.scan_completed = true;
                         self.scan_status = "Ready".into();
                         self.rebuild_tree(cx);
                         return;
@@ -239,6 +243,7 @@ impl AppView {
                 view.current_scan_root = Some(root);
                 view.expanded_paths.clear();
                 view.scanning = false;
+                view.scan_completed = true;
                 view.scan_status = "Scan complete".into();
                 view.rebuild_tree(cx);
             })
@@ -596,14 +601,14 @@ impl Render for AppView {
                                                         .bg(accent),
                                                 )
                                             })
-                                            .when(!scanning && has_drive && self.current_scan_root.is_some(), |el| {
-                                                // Complete: full green bar
+                                            .when(!scanning && self.scan_completed, |el| {
+                                                // Complete: full bar in accent color
                                                 el.child(
                                                     div()
                                                         .h_full()
                                                         .w_full()
                                                         .rounded_sm()
-                                                        .bg(rgb(0x22c55e)),
+                                                        .bg(accent),
                                                 )
                                             }),
                                     ),
