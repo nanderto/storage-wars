@@ -276,7 +276,7 @@ impl AppView {
         self.rebuild_tree(cx);
 
         // Create channel and spawn scanner thread
-        let (tx, rx) = async_channel::bounded(256);
+        let (tx, rx) = async_channel::bounded(32);
         let num_workers = std::thread::available_parallelism()
             .map(|n| n.get().min(8))
             .unwrap_or(4);
@@ -286,29 +286,28 @@ impl AppView {
             scanner::scan_dir_incremental(scan_root, tx, cancel, num_workers);
         });
 
-        // Channel-driven UI loop: read messages directly from the channel.
-        // rx.recv().await yields to gpui while the channel is empty.
-        // When messages are available we drain a batch with try_recv(),
-        // process it, then yield back to gpui for one frame so it can
-        // render and handle input before we take the next batch.
+        // Channel-driven UI loop.  The bounded channel (capacity 32)
+        // creates natural backpressure: scanners block when the channel
+        // is full, so the UI controls the pace.  Each iteration we drain
+        // the channel, process the batch, call cx.notify(), then loop
+        // back to recv().  Because we drained the channel, recv() returns
+        // Pending (channel empty), which yields to gpui — it renders
+        // the frame, then polls us again once the scanners refill.
         let drive_for_save = drive.clone();
-        let bg = cx.background_executor().clone();
         cx.spawn(async move |this: WeakEntity<AppView>, cx: &mut AsyncApp| {
             loop {
-                // Block (async) until the next message arrives.
+                // Wait (async) until a message arrives — yields to gpui
+                // while the channel is empty.
                 let first = match rx.recv().await {
                     Ok(msg) => msg,
                     Err(_) => break, // channel closed
                 };
 
-                // Drain whatever else is immediately available (limit 500
-                // per batch so each update step stays short).
+                // Drain the rest of the channel.  Because capacity is 32,
+                // this is at most 31 more messages — cheap to process.
                 let mut batch = vec![first];
-                while batch.len() < 500 {
-                    match rx.try_recv() {
-                        Ok(msg) => batch.push(msg),
-                        Err(_) => break,
-                    }
+                while let Ok(msg) = rx.try_recv() {
+                    batch.push(msg);
                 }
 
                 let mut got_complete = false;
@@ -361,12 +360,6 @@ impl AppView {
                 if result.is_err() {
                     break; // View dropped
                 }
-
-                // Yield to gpui so it can render a frame and handle input
-                // before we process the next batch.  Without this, recv()
-                // resolves instantly when the scanner is fast, starving the
-                // render loop.
-                bg.timer(std::time::Duration::from_millis(10)).await;
 
                 if got_complete {
                     // Finalize: recalculate sizes, save to DB, rebuild tree
@@ -879,9 +872,7 @@ mod tests {
         });
 
         // Let the scanner threads finish, then process all channel messages.
-        // advance_clock unblocks the yield timer between batches.
         std::thread::sleep(std::time::Duration::from_millis(200));
-        cx.executor().advance_clock(std::time::Duration::from_millis(20));
         cx.run_until_parked();
 
         // Verify scan completed and tree has children
@@ -957,7 +948,6 @@ mod tests {
             v.start_scan(cx);
         });
         std::thread::sleep(std::time::Duration::from_millis(200));
-        cx.executor().advance_clock(std::time::Duration::from_millis(20));
         cx.run_until_parked();
 
         // Scan should be done — root stays collapsed (not auto-expanded)
@@ -1062,7 +1052,6 @@ mod tests {
 
         // Let scanner finish, then process all channel messages
         std::thread::sleep(std::time::Duration::from_millis(200));
-        cx.executor().advance_clock(std::time::Duration::from_millis(20));
         cx.run_until_parked();
 
         view.read_with(cx, |v, _| {
