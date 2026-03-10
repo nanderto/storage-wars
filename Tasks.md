@@ -155,6 +155,6 @@
 ### 7d. Verification
 - [x] `cargo check` — compiles
 - [x] `cargo clippy -- -D warnings` — clean
-- [x] `cargo test` — all 67 tests pass (11 new: 9 scanner + 2 app_view)
+- [x] `cargo test` — all 68 tests pass (12 new: 9 scanner + 3 app_view)
 - [ ] `cargo run` — manual verification
 - [ ] Commit, push, open PR

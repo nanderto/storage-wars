@@ -273,8 +273,6 @@ impl AppView {
             modified: None,
         };
         self.current_scan_root = Some(root_node);
-        // Auto-expand root so children appear as they're scanned
-        self.expanded_paths.insert(root_path.clone());
         self.rebuild_tree(cx);
 
         // Create channel and spawn scanner thread
@@ -321,10 +319,12 @@ impl AppView {
                 // render frames and handle input between updates
                 bg.timer(std::time::Duration::from_millis(50)).await;
 
-                // Drain whatever the consumer thread has buffered
+                // Drain up to 500 messages per tick to avoid blocking
+                // the UI thread for too long on large scans.
                 let batch: Vec<scanner::ScanMessage> = {
                     let mut buf = pending.lock().unwrap();
-                    std::mem::take(&mut *buf)
+                    let take = buf.len().min(500);
+                    buf.drain(..take).collect()
                 };
 
                 let done = scan_done.load(Ordering::SeqCst);
@@ -341,6 +341,7 @@ impl AppView {
                             None => return,
                         };
 
+                        let mut visible_changed = false;
                         for msg in &batch {
                             match msg {
                                 scanner::ScanMessage::DirScanned {
@@ -353,6 +354,13 @@ impl AppView {
                                         children.clone(),
                                     );
                                     view.dirs_scanned += 1;
+                                    // Only need to rebuild the visible tree if
+                                    // an expanded folder received new children.
+                                    if view.expanded_paths.contains(
+                                        parent_path.as_path(),
+                                    ) {
+                                        visible_changed = true;
+                                    }
                                 }
                                 scanner::ScanMessage::ScanError { .. } => {}
                                 scanner::ScanMessage::Complete => {
@@ -361,17 +369,22 @@ impl AppView {
                             }
                         }
 
-                        // Recalculate sizes once per batch
-                        scanner::recalculate_sizes(root);
+                        // Only run the expensive recalculate + rebuild when
+                        // the user can actually see the change (i.e. one of
+                        // the expanded nodes got new children).
+                        if visible_changed {
+                            scanner::recalculate_sizes(root);
+                            view.scan_item_count =
+                                Some(root.file_count + root.folder_count);
+                            view.rebuild_tree(cx);
+                        }
 
+                        // Always update the status text (cheap).
                         view.scan_status = SharedString::from(format!(
                             "Scanning… ({} dirs)",
                             format_number(view.dirs_scanned as u64),
                         ));
-
-                        view.scan_item_count =
-                            Some(root.file_count + root.folder_count);
-                        view.rebuild_tree(cx);
+                        cx.notify();
                     });
 
                     if result.is_err() {
@@ -380,10 +393,17 @@ impl AppView {
                 }
 
                 if got_complete || (batch.is_empty() && done) {
-                    // Save completed scan to DB
+                    // Finalize: recalculate sizes, save to DB, rebuild tree
                     this.update(cx, |view: &mut AppView, cx| {
                         let was_cancelled =
                             view.scan_cancel.load(Ordering::SeqCst);
+
+                        // Final recalculate for accurate stats
+                        if let Some(root) = view.current_scan_root.as_mut() {
+                            scanner::recalculate_sizes(root);
+                            view.scan_item_count =
+                                Some(root.file_count + root.folder_count);
+                        }
 
                         if !was_cancelled {
                             if let Some(root) = &view.current_scan_root {
@@ -417,7 +437,7 @@ impl AppView {
 
                         view.scanning = false;
                         view.scan_completed = !was_cancelled;
-                        cx.notify();
+                        view.rebuild_tree(cx);
                     })
                     .ok();
                     break;
@@ -931,18 +951,14 @@ mod tests {
             );
         });
 
-        // Verify tree view has nodes (root is auto-expanded)
+        // Tree view shows collapsed root (not auto-expanded)
         let tree_view = view.read_with(cx, |v, _| v.tree_view.clone());
         tree_view.read_with(cx, |v, _| {
-            assert!(
-                v.nodes.len() >= 3,
-                "tree should show root + at least 2 children, got {} nodes",
+            assert_eq!(
+                v.nodes.len(),
+                1,
+                "tree should show only collapsed root, got {} nodes",
                 v.nodes.len()
-            );
-            let names: Vec<&str> = v.nodes.iter().map(|n| n.fs_node.name.as_str()).collect();
-            assert!(
-                names.iter().any(|n| *n == "Users"),
-                "tree view should show Users, got: {names:?}"
             );
         });
     }
@@ -973,14 +989,7 @@ mod tests {
             cx.run_until_parked();
         }
 
-        // Scan should be done — root is auto-expanded during scan
-        // Collapse everything first to start from a known state
-        view.update(cx, |v, cx| {
-            v.expanded_paths.clear();
-            v.rebuild_tree(cx);
-        });
-        cx.run_until_parked();
-
+        // Scan should be done — root stays collapsed (not auto-expanded)
         let tree_view = view.read_with(cx, |v, _| v.tree_view.clone());
 
         // 2. Tree should show only the collapsed root
