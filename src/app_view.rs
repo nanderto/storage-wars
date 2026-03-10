@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use gpui::prelude::*;
 use gpui::{
-    div, px, relative, rgb, App, AsyncApp, ClickEvent, Context, Entity, Focusable, FocusHandle,
+    div, px, rgb, App, AsyncApp, ClickEvent, Context, Entity, Focusable, FocusHandle,
     IntoElement, Render, WeakEntity, Window,
 };
 use gpui_component::TitleBar;
@@ -305,45 +305,59 @@ impl Render for AppView {
         let normal = rgb(0xcdd6f4);
         let border = rgb(0x313244);
 
-        // Drive usage info for toolbar
+        // Drive info panel (WizTree-style: Selection, Total Space, Space Used, Space Free)
         let drive_info = self.selected_drive_info().cloned();
-        let usage_bar = if let Some(ref di) = drive_info {
+        let drive_info_panel = if let Some(ref di) = drive_info {
             let used = di.total_space.saturating_sub(di.available_space);
-            let pct = if di.total_space > 0 {
-                used as f32 / di.total_space as f32
+            let used_pct = if di.total_space > 0 {
+                used as f64 / di.total_space as f64 * 100.0
             } else {
                 0.0
             };
-            let label = format!(
-                "{} / {} used",
-                format_size(used),
-                format_size(di.total_space)
-            );
+            let free_pct = 100.0 - used_pct;
+            let selection_label = if di.volume_label.is_empty() {
+                format!("[{}]", di.name)
+            } else {
+                format!("[{}]  {}", di.name, di.volume_label)
+            };
+
+            let label_color = dim;
+            let value_color = normal;
+
             div()
                 .flex()
-                .items_center()
-                .gap_2()
+                .flex_col()
+                .gap_0p5()
+                .pl_4()
+                .text_xs()
+                // Row: Selection
                 .child(
-                    div()
-                        .w(px(120.))
-                        .h(px(10.))
-                        .rounded_sm()
-                        .bg(rgb(0x313244))
-                        .child(
-                            div()
-                                .h_full()
-                                .rounded_sm()
-                                .w(relative(pct))
-                                .bg(if pct > 0.9 {
-                                    rgb(0xef4444)
-                                } else if pct > 0.75 {
-                                    rgb(0xf97316)
-                                } else {
-                                    rgb(0x89b4fa)
-                                }),
-                        ),
+                    div().flex().gap_2()
+                        .child(div().w(px(80.)).text_color(label_color).child("Selection:"))
+                        .child(div().text_color(value_color).font_weight(gpui::FontWeight::BOLD).child(selection_label)),
                 )
-                .child(div().text_xs().text_color(dim).child(label))
+                // Row: Total Space
+                .child(
+                    div().flex().gap_2()
+                        .child(div().w(px(80.)).text_color(label_color).child("Total Space:"))
+                        .child(div().text_color(value_color).font_weight(gpui::FontWeight::BOLD).child(format_size(di.total_space))),
+                )
+                // Row: Space Used
+                .child(
+                    div().flex().gap_2()
+                        .child(div().w(px(80.)).text_color(label_color).child("Space Used:"))
+                        .child(div().text_color(value_color).font_weight(gpui::FontWeight::BOLD).child(
+                            format!("{}  ({:.1}%)", format_size(used), used_pct)
+                        )),
+                )
+                // Row: Space Free
+                .child(
+                    div().flex().gap_2()
+                        .child(div().w(px(80.)).text_color(label_color).child("Space Free:"))
+                        .child(div().text_color(value_color).font_weight(gpui::FontWeight::BOLD).child(
+                            format!("{}  ({:.1}%)", format_size(di.available_space), free_pct)
+                        )),
+                )
         } else {
             div()
         };
@@ -388,36 +402,66 @@ impl Render for AppView {
             .child(
                 div()
                     .flex()
-                    .items_center()
-                    .gap_3()
+                    .items_start()
                     .px_4()
                     .py_2()
-                    .h(px(44.))
                     .bg(rgb(0x181825))
                     .border_b_1()
                     .border_color(border)
-                    .child(self.drive_selector.clone())
+                    // Left group: label + dropdown + scan button
                     .child(
                         div()
-                            .id("scan-now")
-                            .px_4()
-                            .py_1()
-                            .rounded_md()
-                            .cursor_pointer()
-                            .when(has_drive && !scanning, |el| el.bg(rgb(0x89b4fa)))
-                            .when(!has_drive || scanning, |el| el.bg(rgb(0x313244)))
-                            .text_color(if has_drive && !scanning {
-                                rgb(0x1e1e2e)
-                            } else {
-                                dim
-                            })
-                            .text_sm()
-                            .child(scan_label)
-                            .on_click(cx.listener(|this, _: &ClickEvent, _window, cx| {
-                                this.start_scan(cx);
-                            })),
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .flex_shrink_0()
+                            // Row: "Select:" label + dropdown + Scan button
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .text_color(dim)
+                                            .child("Select:"),
+                                    )
+                                    .child(
+                                        div()
+                                            .w(px(200.))
+                                            .child(self.drive_selector.clone()),
+                                    )
+                                    .child(
+                                        div()
+                                            .id("scan-now")
+                                            .px_4()
+                                            .py_1()
+                                            .rounded_md()
+                                            .cursor_pointer()
+                                            .when(has_drive && !scanning, |el| {
+                                                el.bg(rgb(0x89b4fa))
+                                            })
+                                            .when(!has_drive || scanning, |el| {
+                                                el.bg(rgb(0x313244))
+                                            })
+                                            .text_color(if has_drive && !scanning {
+                                                rgb(0x1e1e2e)
+                                            } else {
+                                                dim
+                                            })
+                                            .text_sm()
+                                            .child(scan_label)
+                                            .on_click(cx.listener(
+                                                |this, _: &ClickEvent, _window, cx| {
+                                                    this.start_scan(cx);
+                                                },
+                                            )),
+                                    ),
+                            ),
                     )
-                    .child(usage_bar),
+                    // Right group: drive info panel
+                    .child(drive_info_panel),
             )
             // Row 3: Main content
             .child(
