@@ -34,6 +34,7 @@ pub struct AppView {
     scan_status: SharedString,
     scan_cancel: Arc<AtomicBool>,
     dirs_scanned: usize,
+    last_scan_notify: std::time::Instant,
     /// Override the scan root path (used for testing).
     scan_root_override: Option<PathBuf>,
 
@@ -93,6 +94,7 @@ impl AppView {
             scan_status: "Ready".into(),
             scan_cancel: Arc::new(AtomicBool::new(false)),
             dirs_scanned: 0,
+            last_scan_notify: std::time::Instant::now(),
             scan_root_override: None,
             drive_selector,
             scan_history,
@@ -248,6 +250,7 @@ impl AppView {
         self.scanning = true;
         self.scan_completed = false;
         self.dirs_scanned = 0;
+        self.last_scan_notify = std::time::Instant::now();
         self.scan_status = "Scanning… (0 dirs)".into();
         self.expanded_paths.clear();
 
@@ -286,10 +289,11 @@ impl AppView {
             scanner::scan_dir_incremental(scan_root, tx, cancel, num_workers);
         });
 
-        // Channel-driven UI loop.  Each iteration we drain at most 50
-        // messages, process them, then yield to gpui via a 1ms timer.
-        // The bounded channel (capacity 256) gives scanners room to work
-        // ahead while the batch limit keeps each frame's cost bounded.
+        // Channel-driven UI loop.  Each iteration we drain up to 500
+        // messages (just insert_children calls — cheap), then yield to
+        // gpui via a 1ms timer.  We skip recalculate_sizes and
+        // rebuild_tree mid-scan since sizes are meaningless until all
+        // directories are scanned.  cx.notify() is throttled to ~10fps.
         let drive_for_save = drive.clone();
         let bg = cx.background_executor().clone();
         cx.spawn(async move |this: WeakEntity<AppView>, cx: &mut AsyncApp| {
@@ -301,9 +305,11 @@ impl AppView {
                     Err(_) => break, // channel closed
                 };
 
-                // Drain up to 50 messages per batch to bound per-frame cost.
+                // Drain up to 500 messages per batch.  With
+                // recalculate_sizes eliminated mid-scan, cost is just
+                // insert_children calls (~5ms for 500).
                 let mut batch = vec![first];
-                while batch.len() < 50 {
+                while batch.len() < 500 {
                     match rx.try_recv() {
                         Ok(msg) => batch.push(msg),
                         Err(_) => break,
@@ -317,18 +323,12 @@ impl AppView {
                         None => return,
                     };
 
-                    let mut visible_changed = false;
                     for msg in batch {
                         match msg {
                             scanner::ScanMessage::DirScanned {
                                 parent_path,
                                 children,
                             } => {
-                                if view.expanded_paths.contains(
-                                    parent_path.as_path(),
-                                ) {
-                                    visible_changed = true;
-                                }
                                 scanner::insert_children(
                                     root,
                                     &parent_path,
@@ -343,18 +343,19 @@ impl AppView {
                         }
                     }
 
-                    if visible_changed {
-                        scanner::recalculate_sizes(root);
-                        view.scan_item_count =
-                            Some(root.file_count + root.folder_count);
-                        view.rebuild_tree(cx);
-                    }
-
                     view.scan_status = SharedString::from(format!(
                         "Scanning… ({} dirs)",
                         format_number(view.dirs_scanned as u64),
                     ));
-                    cx.notify();
+
+                    // Throttle re-renders to ~10fps (every 100ms).
+                    let now = std::time::Instant::now();
+                    if now.duration_since(view.last_scan_notify)
+                        >= std::time::Duration::from_millis(100)
+                    {
+                        view.last_scan_notify = now;
+                        cx.notify();
+                    }
                 });
 
                 if result.is_err() {

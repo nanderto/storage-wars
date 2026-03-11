@@ -158,3 +158,11 @@
 - [x] `cargo test` — all 68 tests pass (12 new: 9 scanner + 3 app_view)
 - [ ] `cargo run` — manual verification
 - [ ] Commit, push, open PR
+
+### 7e. Scan Loop Optimization
+- [x] Remove mid-scan `recalculate_sizes` and `rebuild_tree` (sizes meaningless until scan completes)
+- [x] Throttle `cx.notify()` to ~10fps (100ms interval) via `last_scan_notify: Instant` field
+- [x] Increase batch drain limit from 50 → 500 (cheap now without recalculate_sizes)
+- [x] Keep 1ms timer yield between batches for UI responsiveness
+- [x] `cargo check` + `cargo clippy -- -D warnings` — clean
+- [x] `cargo test` — all 68 tests pass
