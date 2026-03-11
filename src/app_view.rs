@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use gpui::prelude::*;
 use gpui::{
@@ -30,6 +32,11 @@ pub struct AppView {
     scan_item_count: Option<u64>,
     last_scan_time: Option<String>,
     scan_status: SharedString,
+    scan_cancel: Arc<AtomicBool>,
+    dirs_scanned: usize,
+    last_scan_notify: std::time::Instant,
+    /// Override the scan root path (used for testing).
+    scan_root_override: Option<PathBuf>,
 
     drive_selector: Entity<DriveSelector>,
     scan_history: Entity<ScanHistory>,
@@ -40,7 +47,14 @@ pub struct AppView {
 impl AppView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let db = persistence::open_db().expect("failed to open database");
+        Self::new_with_db(db, window, cx)
+    }
 
+    pub fn new_with_db(
+        db: rusqlite::Connection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let drive_selector = cx.new(|cx| DriveSelector::new(window, cx));
         let scan_history = cx.new(ScanHistory::new);
         let tree_view = cx.new(TreeView::new);
@@ -78,6 +92,10 @@ impl AppView {
             scan_item_count: None,
             last_scan_time: None,
             scan_status: "Ready".into(),
+            scan_cancel: Arc::new(AtomicBool::new(false)),
+            dirs_scanned: 0,
+            last_scan_notify: std::time::Instant::now(),
+            scan_root_override: None,
             drive_selector,
             scan_history,
             tree_view,
@@ -118,12 +136,11 @@ impl AppView {
         self.last_scan_time = None;
         self.scan_completed = false;
 
-        // Load most recent scan for this drive if one exists
+        // Load scan history sidebar and most recent scan tree if available
         if let Ok(scans) = persistence::get_scans_for_drive(&self.db, &drive) {
             let sh = self.scan_history.clone();
             sh.update(cx, |v, cx| v.set_scans(scans.clone(), cx));
 
-            // If there's a previous scan, load it into the tree immediately
             if let Some(latest) = scans.first() {
                 if let Ok(nodes) = persistence::load_scan_tree(&self.db, latest.id) {
                     if let Some(root) = build_fs_tree(&nodes) {
@@ -139,10 +156,20 @@ impl AppView {
             }
         }
 
-        // No previous scan — show the drive root as a single unexpanded node
+        // No previous scan — show a single collapsed drive node
+        let root_path = self
+            .scan_root_override
+            .clone()
+            .unwrap_or_else(|| PathBuf::from(format!("{}\\", drive)));
+        let display_name = self
+            .scan_root_override
+            .as_ref()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|| format!("{}\\", drive));
+
         self.current_scan_root = Some(FsNode {
-            name: format!("{}\\", drive),
-            path: PathBuf::from(format!("{}\\", drive)),
+            name: display_name,
+            path: root_path,
             is_dir: true,
             current_size: 0,
             prev_size: None,
@@ -210,44 +237,184 @@ impl AppView {
             Some(d) => d,
             None => return,
         };
+
+        // If already scanning, treat click as cancel
         if self.scanning {
+            self.scan_cancel.store(true, Ordering::SeqCst);
             return;
         }
 
+        // Reset cancel flag
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.scan_cancel = Arc::clone(&cancel);
         self.scanning = true;
-        self.scan_status = "Scanning…".into();
-        cx.notify();
+        self.scan_completed = false;
+        self.dirs_scanned = 0;
+        self.last_scan_notify = std::time::Instant::now();
+        self.scan_status = "Scanning… (0 dirs)".into();
+        self.expanded_paths.clear();
 
-        let path = PathBuf::from(format!("{}\\", drive));
+        // Show root placeholder immediately
+        let root_path = self
+            .scan_root_override
+            .clone()
+            .unwrap_or_else(|| PathBuf::from(format!("{}\\", drive)));
+        let display_name = self
+            .scan_root_override
+            .as_ref()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|| format!("{}\\", drive));
+        let root_node = FsNode {
+            name: display_name,
+            path: root_path.clone(),
+            is_dir: true,
+            current_size: 0,
+            prev_size: None,
+            children: vec![],
+            file_count: 0,
+            folder_count: 0,
+            modified: None,
+        };
+        self.current_scan_root = Some(root_node);
+        self.rebuild_tree(cx);
+
+        // Create channel and spawn scanner thread
+        let (tx, rx) = async_channel::bounded(256);
+        let num_workers = std::thread::available_parallelism()
+            .map(|n| n.get().min(8))
+            .unwrap_or(4);
+
+        let scan_root = root_path;
+        std::thread::spawn(move || {
+            scanner::scan_dir_incremental(scan_root, tx, cancel, num_workers);
+        });
+
+        // Channel-driven UI loop.  Each iteration we drain up to 500
+        // messages (just insert_children calls — cheap), then yield to
+        // gpui via a 1ms timer.  We skip recalculate_sizes and
+        // rebuild_tree mid-scan since sizes are meaningless until all
+        // directories are scanned.  cx.notify() is throttled to ~10fps.
         let drive_for_save = drive.clone();
-
-        // Scan on a background thread, then save + refresh on the main thread.
-        let task = cx
-            .background_executor()
-            .spawn(async move { scanner::scan_dir_sync(&path) });
-
+        let bg = cx.background_executor().clone();
         cx.spawn(async move |this: WeakEntity<AppView>, cx: &mut AsyncApp| {
-            let root = task.await;
-            this.update(cx, |view: &mut AppView, cx| {
-                view.scan_item_count = Some(root.file_count + root.folder_count);
-                if persistence::save_scan(&view.db, &drive_for_save, &root).is_ok() {
-                    if let Ok(scans) =
-                        persistence::get_scans_for_drive(&view.db, &drive_for_save)
-                    {
-                        view.last_scan_time =
-                            scans.first().map(|s| s.scanned_at.clone());
-                        let sh = view.scan_history.clone();
-                        sh.update(cx, |v: &mut ScanHistory, cx| v.set_scans(scans, cx));
+            loop {
+                // Wait (async) until a message arrives — yields to gpui
+                // while the channel is empty.
+                let first = match rx.recv().await {
+                    Ok(msg) => msg,
+                    Err(_) => break, // channel closed
+                };
+
+                // Drain up to 500 messages per batch.  With
+                // recalculate_sizes eliminated mid-scan, cost is just
+                // insert_children calls (~5ms for 500).
+                let mut batch = vec![first];
+                while batch.len() < 500 {
+                    match rx.try_recv() {
+                        Ok(msg) => batch.push(msg),
+                        Err(_) => break,
                     }
                 }
-                view.current_scan_root = Some(root);
-                view.expanded_paths.clear();
-                view.scanning = false;
-                view.scan_completed = true;
-                view.scan_status = "Scan complete".into();
-                view.rebuild_tree(cx);
-            })
-            .ok();
+
+                let mut got_complete = false;
+                let result = this.update(cx, |view: &mut AppView, cx| {
+                    let root = match view.current_scan_root.as_mut() {
+                        Some(r) => r,
+                        None => return,
+                    };
+
+                    for msg in batch {
+                        match msg {
+                            scanner::ScanMessage::DirScanned {
+                                parent_path,
+                                children,
+                            } => {
+                                scanner::insert_children(
+                                    root,
+                                    &parent_path,
+                                    children,
+                                );
+                                view.dirs_scanned += 1;
+                            }
+                            scanner::ScanMessage::ScanError { .. } => {}
+                            scanner::ScanMessage::Complete => {
+                                got_complete = true;
+                            }
+                        }
+                    }
+
+                    view.scan_status = SharedString::from(format!(
+                        "Scanning… ({} dirs)",
+                        format_number(view.dirs_scanned as u64),
+                    ));
+
+                    // Throttle re-renders to ~10fps (every 100ms).
+                    let now = std::time::Instant::now();
+                    if now.duration_since(view.last_scan_notify)
+                        >= std::time::Duration::from_millis(100)
+                    {
+                        view.last_scan_notify = now;
+                        cx.notify();
+                    }
+                });
+
+                if result.is_err() {
+                    break; // View dropped
+                }
+
+                if got_complete {
+                    // Finalize: recalculate sizes, save to DB, rebuild tree
+                    this.update(cx, |view: &mut AppView, cx| {
+                        let was_cancelled =
+                            view.scan_cancel.load(Ordering::SeqCst);
+
+                        if let Some(root) = view.current_scan_root.as_mut() {
+                            scanner::recalculate_sizes(root);
+                            view.scan_item_count =
+                                Some(root.file_count + root.folder_count);
+                        }
+
+                        if !was_cancelled {
+                            if let Some(root) = &view.current_scan_root {
+                                if persistence::save_scan(
+                                    &view.db,
+                                    &drive_for_save,
+                                    root,
+                                )
+                                .is_ok()
+                                {
+                                    if let Ok(scans) =
+                                        persistence::get_scans_for_drive(
+                                            &view.db,
+                                            &drive_for_save,
+                                        )
+                                    {
+                                        view.last_scan_time = scans
+                                            .first()
+                                            .map(|s| s.scanned_at.clone());
+                                        let sh = view.scan_history.clone();
+                                        sh.update(cx, |v: &mut ScanHistory, cx| {
+                                            v.set_scans(scans, cx)
+                                        });
+                                    }
+                                }
+                            }
+                            view.scan_status = "Scan complete".into();
+                        } else {
+                            view.scan_status = "Scan cancelled".into();
+                        }
+
+                        view.scanning = false;
+                        view.scan_completed = !was_cancelled;
+                        view.rebuild_tree(cx);
+                    })
+                    .ok();
+                    break;
+                }
+
+                // Yield to gpui so it can render and handle input.
+                bg.timer(std::time::Duration::from_millis(1)).await;
+            }
         })
         .detach();
     }
@@ -333,7 +500,7 @@ impl Render for AppView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let scanning = self.scanning;
         let has_drive = self.selected_drive.is_some();
-        let scan_label: &str = if scanning { "Scanning…" } else { "Scan" };
+        let scan_label: &str = if scanning { "Cancel" } else { "Scan" };
 
         let accent = rgb(0x89b4fa);
         let dim = rgb(0x6c7086);
@@ -555,10 +722,13 @@ impl Render for AppView {
                                             .when(has_drive && !scanning, |el| {
                                                 el.bg(accent)
                                             })
-                                            .when(!has_drive || scanning, |el| {
+                                            .when(scanning, |el| {
+                                                el.bg(rgb(0xf38ba8))
+                                            })
+                                            .when(!has_drive && !scanning, |el| {
                                                 el.bg(rgb(0x313244))
                                             })
-                                            .text_color(if has_drive && !scanning {
+                                            .text_color(if has_drive || scanning {
                                                 rgb(0x1e1e2e)
                                             } else {
                                                 dim
@@ -642,5 +812,256 @@ impl Render for AppView {
                     .child(div().child(status_drive))
                     .child(div().child(status_time)),
             )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Create a tempdir with known structure:
+    ///   root/
+    ///     Users/
+    ///       docs/
+    ///         readme.txt (100 bytes)
+    ///       file.txt (50 bytes)
+    ///     Windows/
+    ///       system.dll (200 bytes)
+    fn make_test_dir() -> tempfile::TempDir {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+
+        let users = root.join("Users");
+        std::fs::create_dir(&users).unwrap();
+        let docs = users.join("docs");
+        std::fs::create_dir(&docs).unwrap();
+        std::fs::write(docs.join("readme.txt"), vec![0u8; 100]).unwrap();
+        std::fs::write(users.join("file.txt"), vec![0u8; 50]).unwrap();
+
+        let windows = root.join("Windows");
+        std::fs::create_dir(&windows).unwrap();
+        std::fs::write(windows.join("system.dll"), vec![0u8; 200]).unwrap();
+
+        dir
+    }
+
+    #[gpui::test]
+    fn scan_button_populates_tree_with_children(cx: &mut gpui::TestAppContext) {
+        cx.update(|app| gpui_component::init(app));
+
+        let test_dir = make_test_dir();
+        let test_path = test_dir.path().to_path_buf();
+
+        let db = persistence::open_in_memory().unwrap();
+
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            let mut app = AppView::new_with_db(db, window, cx);
+            app.scan_root_override = Some(test_path);
+            app
+        });
+
+        // Simulate selecting a drive
+        view.update(cx, |v, cx| {
+            v.on_drive_selected("C:".to_string(), cx);
+        });
+        cx.run_until_parked();
+
+        // Trigger scan
+        view.update(cx, |v, cx| {
+            v.start_scan(cx);
+        });
+
+        // Let the scanner threads finish, then process all channel messages.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        cx.run_until_parked();
+
+        // Verify scan completed and tree has children
+        view.read_with(cx, |v, _| {
+            assert!(
+                !v.scanning,
+                "scan should have completed, status: {}",
+                v.scan_status
+            );
+            assert!(v.scan_completed, "scan_completed should be true");
+
+            let root = v.current_scan_root.as_ref().expect("should have scan root");
+            assert!(
+                !root.children.is_empty(),
+                "root should have children after scan"
+            );
+
+            let child_names: Vec<&str> = root.children.iter().map(|c| c.name.as_str()).collect();
+            assert!(
+                child_names.contains(&"Users"),
+                "should find Users folder, got: {child_names:?}"
+            );
+            assert!(
+                child_names.contains(&"Windows"),
+                "should find Windows folder, got: {child_names:?}"
+            );
+
+            // Verify sizes propagated
+            assert!(
+                root.current_size > 0,
+                "root size should be > 0, got: {}",
+                root.current_size
+            );
+
+            let users = root.children.iter().find(|c| c.name == "Users").unwrap();
+            assert_eq!(users.current_size, 150, "Users = docs/readme.txt(100) + file.txt(50)");
+            assert!(
+                !users.children.is_empty(),
+                "Users should have its own children"
+            );
+        });
+
+        // Tree view shows collapsed root (not auto-expanded)
+        let tree_view = view.read_with(cx, |v, _| v.tree_view.clone());
+        tree_view.read_with(cx, |v, _| {
+            assert_eq!(
+                v.nodes.len(),
+                1,
+                "tree should show only collapsed root, got {} nodes",
+                v.nodes.len()
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn expand_folder_shows_only_immediate_children(cx: &mut gpui::TestAppContext) {
+        cx.update(|app| gpui_component::init(app));
+
+        let test_dir = make_test_dir();
+        let test_path = test_dir.path().to_path_buf();
+
+        let db = persistence::open_in_memory().unwrap();
+
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            let mut app = AppView::new_with_db(db, window, cx);
+            app.scan_root_override = Some(test_path.clone());
+            app
+        });
+
+        // 1. Select drive and run a scan to populate the tree
+        view.update(cx, |v, cx| {
+            v.on_drive_selected("C:".to_string(), cx);
+            v.start_scan(cx);
+        });
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        cx.run_until_parked();
+
+        // Scan should be done — root stays collapsed (not auto-expanded)
+        let tree_view = view.read_with(cx, |v, _| v.tree_view.clone());
+
+        // 2. Tree should show only the collapsed root
+        tree_view.read_with(cx, |v, _| {
+            assert_eq!(v.nodes.len(), 1, "should show only the collapsed root");
+            assert!(!v.nodes[0].expanded, "root should be collapsed");
+        });
+
+        // 3. Expand root → only immediate children (Users, Windows)
+        view.update(cx, |v, cx| {
+            v.on_toggle_expand(test_path.clone(), cx);
+        });
+        cx.run_until_parked();
+
+        tree_view.read_with(cx, |v, _| {
+            // root + Users + Windows = 3
+            assert_eq!(
+                v.nodes.len(),
+                3,
+                "root expanded should show root + 2 children, got: {:?}",
+                v.nodes.iter().map(|n| &n.fs_node.name).collect::<Vec<_>>()
+            );
+            assert!(v.nodes[0].expanded, "root should be expanded");
+
+            // Children at depth 1, collapsed
+            for node in &v.nodes[1..] {
+                assert_eq!(node.depth, 1);
+                assert!(!node.expanded);
+            }
+
+            let child_names: Vec<&str> =
+                v.nodes[1..].iter().map(|n| n.fs_node.name.as_str()).collect();
+            assert!(child_names.contains(&"Users"), "got: {child_names:?}");
+            assert!(child_names.contains(&"Windows"), "got: {child_names:?}");
+        });
+
+        // 4. Expand Users → only its immediate children (docs, file.txt)
+        //    NOT docs/readme.txt (docs is still collapsed)
+        let users_path = test_path.join("Users");
+        view.update(cx, |v, cx| {
+            v.on_toggle_expand(users_path, cx);
+        });
+        cx.run_until_parked();
+
+        tree_view.read_with(cx, |v, _| {
+            // root + Users(expanded) + docs + file.txt + Windows = 5
+            assert_eq!(
+                v.nodes.len(),
+                5,
+                "expanding Users should add docs + file.txt, got: {:?}",
+                v.nodes.iter().map(|n| (&n.fs_node.name, n.depth)).collect::<Vec<_>>()
+            );
+
+            let depth2: Vec<&str> = v
+                .nodes
+                .iter()
+                .filter(|n| n.depth == 2)
+                .map(|n| n.fs_node.name.as_str())
+                .collect();
+            assert!(depth2.contains(&"docs"), "got: {depth2:?}");
+            assert!(depth2.contains(&"file.txt"), "got: {depth2:?}");
+
+            // readme.txt must NOT be visible — docs is collapsed
+            let all_names: Vec<&str> =
+                v.nodes.iter().map(|n| n.fs_node.name.as_str()).collect();
+            assert!(
+                !all_names.contains(&"readme.txt"),
+                "readme.txt should not be visible — docs is still collapsed"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn scan_cancel_stops_workers(cx: &mut gpui::TestAppContext) {
+        cx.update(|app| gpui_component::init(app));
+
+        let test_dir = make_test_dir();
+        let test_path = test_dir.path().to_path_buf();
+
+        let db = persistence::open_in_memory().unwrap();
+
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            let mut app = AppView::new_with_db(db, window, cx);
+            app.scan_root_override = Some(test_path);
+            app
+        });
+
+        // Select drive and start scan
+        view.update(cx, |v, cx| {
+            v.on_drive_selected("C:".to_string(), cx);
+            v.start_scan(cx);
+        });
+
+        // Cancel immediately
+        view.update(cx, |v, cx| {
+            v.start_scan(cx); // second call = cancel
+            let _ = cx; // suppress warning
+        });
+
+        // Let scanner finish, then process all channel messages
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        cx.run_until_parked();
+
+        view.read_with(cx, |v, _| {
+            assert!(!v.scanning, "should no longer be scanning after cancel");
+            assert!(!v.scan_completed, "scan_completed should be false after cancel");
+            assert_eq!(v.scan_status.as_ref(), "Scan cancelled");
+        });
     }
 }

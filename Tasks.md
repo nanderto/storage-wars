@@ -128,3 +128,41 @@
 - [x] `cargo test` — all tests pass
 - [ ] `cargo run` — manual verification
 - [x] Commit, push, open PR
+
+## Phase 7 — Incremental Parallel Scanner
+
+### 7a. Dependencies
+- [x] Add `async-channel = "2"` to `[dependencies]` in `Cargo.toml`
+
+### 7b. Scanner Module (`scanner.rs`)
+- [x] Add `ScanMessage` enum (`DirScanned`, `ScanError`, `Complete`)
+- [x] Add `read_dir_immediate(dir)` — reads one folder without recursion
+- [x] Add `scan_dir_incremental(root, tx, cancelled, num_workers)` — parallel scanner with work queue + condvar
+- [x] Add `insert_children(root, parent_path, children)` — insert into tree at path
+- [x] Add `recalculate_sizes(node)` — bottom-up size/count recalculation
+- [x] Tests: `read_dir_immediate` (files+dirs, empty, nonexistent)
+- [x] Tests: `insert_children` (at root, nested, missing parent)
+- [x] Tests: `recalculate_sizes` (bottom-up propagation)
+- [x] Tests: `scan_dir_incremental` (full scan, cancellation)
+
+### 7c. App Wiring (`app_view.rs`)
+- [x] Add `scan_cancel: Arc<AtomicBool>` and `dirs_scanned: usize` fields
+- [x] Rewrite `start_scan()` — channel-based async loop with incremental tree updates
+- [x] Cancel support — clicking "Scan" during scan sets cancel flag, partial tree stays visible
+- [x] "Scan" button shows "Cancel" (red) while scanning
+- [x] Status text shows "Scanning… (N dirs)" during scan
+
+### 7d. Verification
+- [x] `cargo check` — compiles
+- [x] `cargo clippy -- -D warnings` — clean
+- [x] `cargo test` — all 68 tests pass (12 new: 9 scanner + 3 app_view)
+- [ ] `cargo run` — manual verification
+- [ ] Commit, push, open PR
+
+### 7e. Scan Loop Optimization
+- [x] Remove mid-scan `recalculate_sizes` and `rebuild_tree` (sizes meaningless until scan completes)
+- [x] Throttle `cx.notify()` to ~10fps (100ms interval) via `last_scan_notify: Instant` field
+- [x] Increase batch drain limit from 50 → 500 (cheap now without recalculate_sizes)
+- [x] Keep 1ms timer yield between batches for UI responsiveness
+- [x] `cargo check` + `cargo clippy -- -D warnings` — clean
+- [x] `cargo test` — all 68 tests pass
