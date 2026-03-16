@@ -166,3 +166,12 @@
 - [x] Keep 1ms timer yield between batches for UI responsiveness
 - [x] `cargo check` + `cargo clippy -- -D warnings` — clean
 - [x] `cargo test` — all 68 tests pass
+
+### 7f. Fix % of Parent + Mid-scan Visibility
+- [x] Add `pct_of_parent: f32` field to `UiNode` (actual % of parent total, separate from bar-width fraction)
+- [x] Compute `pct_of_parent` in `flatten_tree`/`flatten_node` alongside `scan_progress`
+- [x] Display `pct_of_parent` in tree_view instead of `scan_progress * 100`
+- [x] Re-enable mid-scan `recalculate_sizes` + `rebuild_tree` at 2fps (500ms) so users see data accumulating
+- [x] Update tests (scanner + tree_view) for new field
+- [x] `cargo check` + `cargo clippy -- -D warnings` — clean
+- [x] `cargo test` — all 68 tests pass
