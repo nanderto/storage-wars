@@ -30,8 +30,10 @@ pub struct UiNode {
     pub fs_node: FsNode,
     pub depth: usize,
     pub expanded: bool,
-    /// Fraction of the drive/parent consumed: 0.0–1.0. Used to size the bar.
+    /// Fraction of the largest sibling: 0.0–1.0. Used to size the bar.
     pub scan_progress: f32,
+    /// Actual percentage of parent's total size (0.0–100.0).
+    pub pct_of_parent: f32,
 }
 
 // ---------------------------------------------------------------------------

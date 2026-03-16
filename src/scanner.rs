@@ -306,12 +306,14 @@ pub fn recalculate_sizes(node: &mut FsNode) {
 
 /// Flatten `roots` into a `Vec<UiNode>` for rendering.
 /// Only expands nodes whose path is in `expanded_paths`.
-/// `scan_progress` for each node is its fraction of the largest sibling's size.
+/// `scan_progress` for each node is its fraction of the parent's total size (for the bar)
+/// and `pct_of_parent` is the actual percentage of the parent total.
 pub fn flatten_tree(roots: &[FsNode], expanded_paths: &HashSet<PathBuf>) -> Vec<UiNode> {
+    let parent_total: u64 = roots.iter().map(|n| n.current_size).sum();
     let max_size = roots.iter().map(|n| n.current_size).max().unwrap_or(0);
     let mut out = Vec::new();
     for node in roots {
-        flatten_node(node, 0, max_size, expanded_paths, &mut out);
+        flatten_node(node, 0, parent_total, max_size, expanded_paths, &mut out);
     }
     out
 }
@@ -319,14 +321,23 @@ pub fn flatten_tree(roots: &[FsNode], expanded_paths: &HashSet<PathBuf>) -> Vec<
 fn flatten_node(
     node: &FsNode,
     depth: usize,
+    parent_total: u64,
     parent_max_size: u64,
     expanded_paths: &HashSet<PathBuf>,
     out: &mut Vec<UiNode>,
 ) {
+    // Bar width: fraction of largest sibling (so the biggest child fills the bar)
     let scan_progress = if parent_max_size == 0 {
         0.0_f32
     } else {
         (node.current_size as f64 / parent_max_size as f64).min(1.0) as f32
+    };
+
+    // Actual % of parent's total size
+    let pct_of_parent = if parent_total == 0 {
+        0.0_f32
+    } else {
+        (node.current_size as f64 / parent_total as f64 * 100.0) as f32
     };
 
     let expanded = node.is_dir && expanded_paths.contains(&node.path);
@@ -336,12 +347,14 @@ fn flatten_node(
         depth,
         expanded,
         scan_progress,
+        pct_of_parent,
     });
 
     if expanded {
+        let child_total: u64 = node.children.iter().map(|c| c.current_size).sum();
         let child_max = node.children.iter().map(|c| c.current_size).max().unwrap_or(0);
         for child in &node.children {
-            flatten_node(child, depth + 1, child_max, expanded_paths, out);
+            flatten_node(child, depth + 1, child_total, child_max, expanded_paths, out);
         }
     }
 }
@@ -518,13 +531,18 @@ mod tests {
         expanded.insert(PathBuf::from("/root"));
 
         let flat = flatten_tree(&tree, &expanded);
-        // docs (200) is the largest child → progress == 1.0
+        // docs (200) is the largest child → bar progress == 1.0
         let docs = flat.iter().find(|n| n.fs_node.name == "docs").unwrap();
         assert!((docs.scan_progress - 1.0).abs() < f32::EPSILON);
 
-        // empty (0) → progress == 0.0
+        // empty (0) → bar progress == 0.0
         let empty = flat.iter().find(|n| n.fs_node.name == "empty").unwrap();
         assert!((empty.scan_progress).abs() < f32::EPSILON);
+
+        // pct_of_parent: docs=200 of parent total 200 → 100.0%, empty=0 → 0.0%
+        // (Parent total = 200, since root's children sum to 200)
+        assert!((docs.pct_of_parent - 100.0).abs() < 0.1);
+        assert!((empty.pct_of_parent).abs() < f32::EPSILON);
     }
 
     // -----------------------------------------------------------------------

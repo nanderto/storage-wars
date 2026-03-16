@@ -348,13 +348,17 @@ impl AppView {
                         format_number(view.dirs_scanned as u64),
                     ));
 
-                    // Throttle re-renders to ~10fps (every 100ms).
+                    // Throttle tree updates to ~2fps (every 500ms) so users
+                    // see data accumulating during the scan.
                     let now = std::time::Instant::now();
                     if now.duration_since(view.last_scan_notify)
-                        >= std::time::Duration::from_millis(100)
+                        >= std::time::Duration::from_millis(500)
                     {
                         view.last_scan_notify = now;
-                        cx.notify();
+                        if let Some(root) = view.current_scan_root.as_mut() {
+                            scanner::recalculate_sizes(root);
+                        }
+                        view.rebuild_tree(cx);
                     }
                 });
 

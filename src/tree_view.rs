@@ -137,7 +137,7 @@ impl Render for TreeView {
             .enumerate()
             .map(|(ix, node)| {
                 let change = SizeChange::from_node(&node.fs_node);
-                let pct_parent = format!("{:.1} %", node.scan_progress * 100.0);
+                let pct_parent = format!("{:.1} %", node.pct_of_parent);
                 let prev_size_label = match node.fs_node.prev_size {
                     Some(s) => format_size(s),
                     None => "—".into(),
@@ -364,6 +364,7 @@ mod tests {
             depth: 0,
             expanded: false,
             scan_progress: 1.0,
+            pct_of_parent: 100.0,
         }
     }
 
@@ -383,6 +384,7 @@ mod tests {
             depth: 0,
             expanded: false,
             scan_progress: 0.5,
+            pct_of_parent: 50.0,
         }
     }
 
@@ -463,6 +465,7 @@ mod tests {
             depth: 0,
             expanded: false,
             scan_progress: 0.8,
+            pct_of_parent: 80.0,
         };
         view.update(cx, |v, cx| v.set_nodes(vec![node], cx));
         cx.run_until_parked();
