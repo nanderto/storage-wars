@@ -306,14 +306,15 @@ pub fn recalculate_sizes(node: &mut FsNode) {
 
 /// Flatten `roots` into a `Vec<UiNode>` for rendering.
 /// Only expands nodes whose path is in `expanded_paths`.
-/// `scan_progress` for each node is its fraction of the parent's total size (for the bar)
-/// and `pct_of_parent` is the actual percentage of the parent total.
+/// Children are sorted by size descending (largest first).
+/// `pct_of_parent` is the actual percentage of the parent's total size.
 pub fn flatten_tree(roots: &[FsNode], expanded_paths: &HashSet<PathBuf>) -> Vec<UiNode> {
     let parent_total: u64 = roots.iter().map(|n| n.current_size).sum();
-    let max_size = roots.iter().map(|n| n.current_size).max().unwrap_or(0);
+    let mut sorted: Vec<&FsNode> = roots.iter().collect();
+    sorted.sort_by(|a, b| b.current_size.cmp(&a.current_size));
     let mut out = Vec::new();
-    for node in roots {
-        flatten_node(node, 0, parent_total, max_size, expanded_paths, &mut out);
+    for node in sorted {
+        flatten_node(node, 0, parent_total, expanded_paths, &mut out);
     }
     out
 }
@@ -322,18 +323,9 @@ fn flatten_node(
     node: &FsNode,
     depth: usize,
     parent_total: u64,
-    parent_max_size: u64,
     expanded_paths: &HashSet<PathBuf>,
     out: &mut Vec<UiNode>,
 ) {
-    // Bar width: fraction of largest sibling (so the biggest child fills the bar)
-    let scan_progress = if parent_max_size == 0 {
-        0.0_f32
-    } else {
-        (node.current_size as f64 / parent_max_size as f64).min(1.0) as f32
-    };
-
-    // Actual % of parent's total size
     let pct_of_parent = if parent_total == 0 {
         0.0_f32
     } else {
@@ -346,15 +338,15 @@ fn flatten_node(
         fs_node: node.clone(),
         depth,
         expanded,
-        scan_progress,
         pct_of_parent,
     });
 
     if expanded {
         let child_total: u64 = node.children.iter().map(|c| c.current_size).sum();
-        let child_max = node.children.iter().map(|c| c.current_size).max().unwrap_or(0);
-        for child in &node.children {
-            flatten_node(child, depth + 1, child_total, child_max, expanded_paths, out);
+        let mut sorted: Vec<&FsNode> = node.children.iter().collect();
+        sorted.sort_by(|a, b| b.current_size.cmp(&a.current_size));
+        for child in sorted {
+            flatten_node(child, depth + 1, child_total, expanded_paths, out);
         }
     }
 }
@@ -525,24 +517,31 @@ mod tests {
     }
 
     #[test]
-    fn flatten_scan_progress_largest_sibling_is_one() {
+    fn flatten_pct_of_parent_correct() {
         let tree = make_tree();
         let mut expanded = HashSet::new();
         expanded.insert(PathBuf::from("/root"));
 
         let flat = flatten_tree(&tree, &expanded);
-        // docs (200) is the largest child → bar progress == 1.0
+        // docs=200 of parent total 200 → 100.0%
         let docs = flat.iter().find(|n| n.fs_node.name == "docs").unwrap();
-        assert!((docs.scan_progress - 1.0).abs() < f32::EPSILON);
-
-        // empty (0) → bar progress == 0.0
-        let empty = flat.iter().find(|n| n.fs_node.name == "empty").unwrap();
-        assert!((empty.scan_progress).abs() < f32::EPSILON);
-
-        // pct_of_parent: docs=200 of parent total 200 → 100.0%, empty=0 → 0.0%
-        // (Parent total = 200, since root's children sum to 200)
         assert!((docs.pct_of_parent - 100.0).abs() < 0.1);
+
+        // empty=0 of parent total 200 → 0.0%
+        let empty = flat.iter().find(|n| n.fs_node.name == "empty").unwrap();
         assert!((empty.pct_of_parent).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn flatten_children_sorted_by_size_descending() {
+        let tree = make_tree();
+        let mut expanded = HashSet::new();
+        expanded.insert(PathBuf::from("/root"));
+
+        let flat = flatten_tree(&tree, &expanded);
+        // Children should be sorted: docs (200) before empty (0)
+        assert_eq!(flat[1].fs_node.name, "docs");
+        assert_eq!(flat[2].fs_node.name, "empty");
     }
 
     // -----------------------------------------------------------------------

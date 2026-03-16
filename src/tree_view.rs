@@ -71,7 +71,7 @@ struct RowSnapshot {
     files_label: SharedString,
     folders_label: SharedString,
     modified_label: SharedString,
-    scan_progress: f32,
+    bar_width: f32,
     bar_color: Rgba,
 }
 
@@ -175,7 +175,7 @@ impl Render for TreeView {
                         .clone()
                         .unwrap_or_else(|| "—".into())
                         .into(),
-                    scan_progress: node.scan_progress,
+                    bar_width: node.pct_of_parent / 100.0,
                     bar_color: bar_color(change),
                 }
             })
@@ -249,7 +249,7 @@ impl Render for TreeView {
                             div()
                                 .h_full()
                                 .rounded_sm()
-                                .w(relative(row.scan_progress))
+                                .w(relative(row.bar_width))
                                 .bg(row.bar_color),
                         ),
                 )
@@ -363,7 +363,6 @@ mod tests {
             },
             depth: 0,
             expanded: false,
-            scan_progress: 1.0,
             pct_of_parent: 100.0,
         }
     }
@@ -383,7 +382,6 @@ mod tests {
             },
             depth: 0,
             expanded: false,
-            scan_progress: 0.5,
             pct_of_parent: 50.0,
         }
     }
@@ -464,7 +462,6 @@ mod tests {
             },
             depth: 0,
             expanded: false,
-            scan_progress: 0.8,
             pct_of_parent: 80.0,
         };
         view.update(cx, |v, cx| v.set_nodes(vec![node], cx));
