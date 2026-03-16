@@ -167,11 +167,14 @@
 - [x] `cargo check` + `cargo clippy -- -D warnings` — clean
 - [x] `cargo test` — all 68 tests pass
 
-### 7f. Fix % of Parent + Mid-scan Visibility
+### 7f. Fix % of Parent + Mid-scan Visibility + Sort + Bar Widths
 - [x] Add `pct_of_parent: f32` field to `UiNode` (actual % of parent total, separate from bar-width fraction)
 - [x] Compute `pct_of_parent` in `flatten_tree`/`flatten_node` alongside `scan_progress`
 - [x] Display `pct_of_parent` in tree_view instead of `scan_progress * 100`
 - [x] Re-enable mid-scan `recalculate_sizes` + `rebuild_tree` at 2fps (500ms) so users see data accumulating
 - [x] Update tests (scanner + tree_view) for new field
+- [x] Sort children by size descending (largest first) in `flatten_node`
+- [x] Change bar width to use `pct_of_parent / 100.0` instead of fraction-of-largest-sibling
+- [x] Remove redundant `scan_progress` field from `UiNode`
 - [x] `cargo check` + `cargo clippy -- -D warnings` — clean
-- [x] `cargo test` — all 68 tests pass
+- [ ] `cargo test` — pending build cache rebuild after OOM
