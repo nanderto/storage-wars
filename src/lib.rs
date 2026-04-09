@@ -1,4 +1,5 @@
 pub mod app_view;
+pub mod directory_scanner;
 pub mod drive_selector;
 pub mod models;
 pub mod persistence;

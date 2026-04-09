@@ -300,6 +300,19 @@ pub fn recalculate_sizes(node: &mut FsNode) {
         .sum();
 }
 
+/// Build a tree from a flat map of parent_path → children.
+/// Recursively attaches children from the map. O(n) total.
+pub fn assemble_tree(root: &mut FsNode, children_map: &mut HashMap<PathBuf, Vec<FsNode>>) {
+    if let Some(children) = children_map.remove(&root.path) {
+        root.children = children;
+        for child in &mut root.children {
+            if child.is_dir {
+                assemble_tree(child, children_map);
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tree flattening — turns the nested FsNode tree into a flat list for the UI
 // ---------------------------------------------------------------------------
@@ -913,6 +926,61 @@ mod tests {
         assert_eq!(root.current_size, 300);
         assert_eq!(root.file_count, 2);
         assert_eq!(root.folder_count, 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // assemble_tree tests
+    // -----------------------------------------------------------------------
+
+    fn make_fsnode(name: &str, path: &str, is_dir: bool) -> FsNode {
+        FsNode {
+            name: name.into(),
+            path: PathBuf::from(path),
+            is_dir,
+            current_size: 0,
+            prev_size: None,
+            children: vec![],
+            file_count: 0,
+            folder_count: 0,
+            modified: None,
+        }
+    }
+
+    #[test]
+    fn assemble_tree_builds_nested_structure() {
+        let root_path = PathBuf::from("/root");
+        let sub_path = PathBuf::from("/root/sub");
+
+        let mut map: HashMap<PathBuf, Vec<FsNode>> = HashMap::new();
+        map.insert(
+            root_path.clone(),
+            vec![
+                make_fsnode("sub", "/root/sub", true),
+                make_fsnode("a.txt", "/root/a.txt", false),
+            ],
+        );
+        map.insert(
+            sub_path.clone(),
+            vec![make_fsnode("b.txt", "/root/sub/b.txt", false)],
+        );
+
+        let mut root = make_fsnode("root", "/root", true);
+        assemble_tree(&mut root, &mut map);
+
+        assert_eq!(root.children.len(), 2);
+        let sub = root.children.iter().find(|c| c.name == "sub").unwrap();
+        assert_eq!(sub.children.len(), 1);
+        assert_eq!(sub.children[0].name, "b.txt");
+        // Map should be consumed
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn assemble_tree_empty_map_leaves_root_childless() {
+        let mut map: HashMap<PathBuf, Vec<FsNode>> = HashMap::new();
+        let mut root = make_fsnode("root", "/root", true);
+        assemble_tree(&mut root, &mut map);
+        assert!(root.children.is_empty());
     }
 
     // -----------------------------------------------------------------------

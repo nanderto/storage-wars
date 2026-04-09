@@ -157,7 +157,7 @@
 - [x] `cargo clippy -- -D warnings` — clean
 - [x] `cargo test` — all 68 tests pass (12 new: 9 scanner + 3 app_view)
 - [ ] `cargo run` — manual verification
-- [ ] Commit, push, open PR
+- [x] Commit, push, open PR
 
 ### 7e. Scan Loop Optimization
 - [x] Remove mid-scan `recalculate_sizes` and `rebuild_tree` (sizes meaningless until scan completes)
@@ -177,4 +177,4 @@
 - [x] Change bar width to use `pct_of_parent / 100.0` instead of fraction-of-largest-sibling
 - [x] Remove redundant `scan_progress` field from `UiNode`
 - [x] `cargo check` + `cargo clippy -- -D warnings` — clean
-- [ ] `cargo test` — pending build cache rebuild after OOM
+- [x] `cargo test` — all 71 tests pass
