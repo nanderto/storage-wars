@@ -178,3 +178,18 @@
 - [x] Remove redundant `scan_progress` field from `UiNode`
 - [x] `cargo check` + `cargo clippy -- -D warnings` — clean
 - [x] `cargo test` — all 71 tests pass
+
+### 7g. DirectoryScanner Actor Integration
+- [x] Wire `Entity<DirectoryScanner>` into `AppView` struct + constructor
+- [x] Subscribe to `ScannerEvent::Progress` and `ScannerEvent::Complete`
+- [x] Replace 190-line inline `start_scan()` async loop with actor delegation (~35 lines)
+- [x] Add `on_scan_progress()` handler — uses `scanner.flatten_visible()` (O(visible) vs O(entire_tree))
+- [x] Add `on_scan_complete()` handler — takes tree, saves to DB, rebuilds full tree
+- [x] Update `on_toggle_expand()` to use `flatten_visible()` during scan
+- [x] Remove obsolete fields: `scan_cancel`, `dirs_scanned`, `last_scan_notify`
+- [x] Remove dead imports: `AtomicBool`, `Ordering`, `Arc`, `AsyncApp`, `WeakEntity`
+- [x] Add 6 DirectoryScanner tests (flatten_visible: empty/collapsed/expanded/nested + take_tree)
+- [x] `cargo clippy -- -D warnings` — clean
+- [x] `cargo test` — all 77 tests pass (6 new)
+- [ ] `cargo run` — manual verification
+- [ ] Commit, push, open PR

@@ -238,3 +238,226 @@ impl DirectoryScanner {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    /// Helper: build a DirectoryScanner with a pre-populated children_map
+    /// (no gpui context needed for flatten_visible tests).
+    fn make_scanner_with_map() -> DirectoryScanner {
+        let root = PathBuf::from("/root");
+        let sub_a = root.join("sub_a");
+        let sub_b = root.join("sub_b");
+        let nested = sub_a.join("nested");
+
+        let mut children_map: HashMap<PathBuf, Vec<FsNode>> = HashMap::new();
+
+        // Root has two subdirs and one file
+        children_map.insert(
+            root.clone(),
+            vec![
+                FsNode {
+                    name: "sub_a".into(),
+                    path: sub_a.clone(),
+                    is_dir: true,
+                    current_size: 0,
+                    prev_size: None,
+                    children: vec![],
+                    file_count: 0,
+                    folder_count: 0,
+                    modified: None,
+                },
+                FsNode {
+                    name: "sub_b".into(),
+                    path: sub_b.clone(),
+                    is_dir: true,
+                    current_size: 0,
+                    prev_size: None,
+                    children: vec![],
+                    file_count: 0,
+                    folder_count: 0,
+                    modified: None,
+                },
+                FsNode {
+                    name: "file.txt".into(),
+                    path: root.join("file.txt"),
+                    is_dir: false,
+                    current_size: 100,
+                    prev_size: None,
+                    children: vec![],
+                    file_count: 0,
+                    folder_count: 0,
+                    modified: None,
+                },
+            ],
+        );
+
+        // sub_a has a nested dir and a file
+        children_map.insert(
+            sub_a,
+            vec![
+                FsNode {
+                    name: "nested".into(),
+                    path: nested,
+                    is_dir: true,
+                    current_size: 0,
+                    prev_size: None,
+                    children: vec![],
+                    file_count: 0,
+                    folder_count: 0,
+                    modified: None,
+                },
+                FsNode {
+                    name: "a.txt".into(),
+                    path: PathBuf::from("/root/sub_a/a.txt"),
+                    is_dir: false,
+                    current_size: 50,
+                    prev_size: None,
+                    children: vec![],
+                    file_count: 0,
+                    folder_count: 0,
+                    modified: None,
+                },
+            ],
+        );
+
+        DirectoryScanner {
+            children_map,
+            root_path: Some(root),
+            root_display_name: Some("root".into()),
+            dirs_scanned: 3,
+            is_scanning: false,
+            cancel: Arc::new(AtomicBool::new(false)),
+            finished_tree: None,
+        }
+    }
+
+    #[test]
+    fn flatten_visible_empty_scanner() {
+        let scanner = DirectoryScanner {
+            children_map: HashMap::new(),
+            root_path: None,
+            root_display_name: None,
+            dirs_scanned: 0,
+            is_scanning: false,
+            cancel: Arc::new(AtomicBool::new(false)),
+            finished_tree: None,
+        };
+        let nodes = scanner.flatten_visible(&HashSet::new());
+        assert!(nodes.is_empty(), "empty scanner should return no nodes");
+    }
+
+    #[test]
+    fn flatten_visible_collapsed_root() {
+        let scanner = make_scanner_with_map();
+        let nodes = scanner.flatten_visible(&HashSet::new());
+        assert_eq!(nodes.len(), 1, "collapsed root = 1 node");
+        assert_eq!(nodes[0].fs_node.name, "root");
+        assert_eq!(nodes[0].depth, 0);
+        assert!(!nodes[0].expanded);
+    }
+
+    #[test]
+    fn flatten_visible_expanded_root() {
+        let scanner = make_scanner_with_map();
+        let mut expanded = HashSet::new();
+        expanded.insert(PathBuf::from("/root"));
+
+        let nodes = scanner.flatten_visible(&expanded);
+        // root + sub_a + sub_b + file.txt = 4
+        assert_eq!(nodes.len(), 4, "expanded root = root + 3 children");
+        assert!(nodes[0].expanded);
+        assert_eq!(nodes[0].depth, 0);
+
+        let names: Vec<&str> = nodes[1..].iter().map(|n| n.fs_node.name.as_str()).collect();
+        assert!(names.contains(&"sub_a"), "got: {names:?}");
+        assert!(names.contains(&"sub_b"), "got: {names:?}");
+        assert!(names.contains(&"file.txt"), "got: {names:?}");
+
+        for n in &nodes[1..] {
+            assert_eq!(n.depth, 1);
+        }
+    }
+
+    #[test]
+    fn flatten_visible_nested_expansion() {
+        let scanner = make_scanner_with_map();
+        let mut expanded = HashSet::new();
+        expanded.insert(PathBuf::from("/root"));
+        expanded.insert(PathBuf::from("/root/sub_a"));
+
+        let nodes = scanner.flatten_visible(&expanded);
+        // root + sub_a(expanded) + nested + a.txt + sub_b + file.txt = 6
+        assert_eq!(
+            nodes.len(),
+            6,
+            "nested expansion: got {:?}",
+            nodes.iter().map(|n| (&n.fs_node.name, n.depth)).collect::<Vec<_>>()
+        );
+
+        // Verify depths
+        let depth2: Vec<&str> = nodes
+            .iter()
+            .filter(|n| n.depth == 2)
+            .map(|n| n.fs_node.name.as_str())
+            .collect();
+        assert!(depth2.contains(&"nested"), "got: {depth2:?}");
+        assert!(depth2.contains(&"a.txt"), "got: {depth2:?}");
+    }
+
+    // -----------------------------------------------------------------------
+    // Integration tests — need gpui context for cx.spawn in start_scan.
+    // DirectoryScanner doesn't implement Render, so we test it through
+    // AppView (the real integration point) in app_view::tests.
+    // The unit tests above cover flatten_visible thoroughly.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn take_tree_returns_none_before_scan() {
+        let mut scanner = DirectoryScanner {
+            children_map: HashMap::new(),
+            root_path: None,
+            root_display_name: None,
+            dirs_scanned: 0,
+            is_scanning: false,
+            cancel: Arc::new(AtomicBool::new(false)),
+            finished_tree: None,
+        };
+        assert!(scanner.take_tree().is_none(), "no tree before scan");
+    }
+
+    #[test]
+    fn take_tree_returns_none_after_taken() {
+        let mut scanner = DirectoryScanner {
+            children_map: HashMap::new(),
+            root_path: None,
+            root_display_name: None,
+            dirs_scanned: 0,
+            is_scanning: false,
+            cancel: Arc::new(AtomicBool::new(false)),
+            finished_tree: Some(FsNode {
+                name: "root".into(),
+                path: PathBuf::from("/root"),
+                is_dir: true,
+                current_size: 100,
+                prev_size: None,
+                children: vec![],
+                file_count: 1,
+                folder_count: 0,
+                modified: None,
+            }),
+        };
+
+        let first = scanner.take_tree();
+        assert!(first.is_some(), "first take should return the tree");
+
+        let second = scanner.take_tree();
+        assert!(second.is_none(), "second take should return None");
+    }
+}
