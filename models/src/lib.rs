@@ -3,7 +3,7 @@
 //! This crate provides the fundamental data structures used throughout the
 //! application, including filesystem tree nodes, database representations,
 //! scan session metadata, drive information, UI state wrappers, size change
-//! classification, and scan messaging.
+//! classification, and scan message enums.
 
 pub mod db_node;
 pub mod drive_info;

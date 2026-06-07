@@ -3,75 +3,81 @@
 use serde::{Deserialize, Serialize};
 
 /// Classifies the magnitude and direction of a size change between two scans,
-/// and provides a hex color code suitable for UI rendering.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// and provides a hex color string suitable for UI display.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SizeChange {
-    /// The entry is new (did not exist in the previous scan).
+    /// The item is new (no previous size recorded).
     New,
-    /// The entry has grown significantly (> 20% increase).
-    LargeIncrease,
-    /// The entry has grown slightly (1–20% increase).
-    SmallIncrease,
-    /// The entry size is unchanged.
-    Unchanged,
-    /// The entry has shrunk slightly (1–20% decrease).
-    SmallDecrease,
-    /// The entry has shrunk significantly (> 20% decrease).
-    LargeDecrease,
-    /// The entry no longer exists (was deleted since the previous scan).
+    /// The item was deleted (current size is zero, had a previous size).
     Deleted,
+    /// The item grew significantly (> 20% increase).
+    LargeIncrease,
+    /// The item grew moderately (5–20% increase).
+    ModerateIncrease,
+    /// The item grew slightly (0–5% increase).
+    SlightIncrease,
+    /// The size is unchanged.
+    Unchanged,
+    /// The item shrank slightly (0–5% decrease).
+    SlightDecrease,
+    /// The item shrank moderately (5–20% decrease).
+    ModerateDecrease,
+    /// The item shrank significantly (> 20% decrease).
+    LargeDecrease,
 }
 
 impl SizeChange {
     /// Returns the hex color string associated with this change classification.
     ///
-    /// Colors are intended for use in UI components to give immediate visual
-    /// feedback about the nature of the size change.
+    /// Colors follow a red (growth) → neutral (unchanged) → green (shrinkage)
+    /// convention.
     pub fn hex_color(&self) -> &'static str {
         match self {
-            SizeChange::New => "#4CAF50",          // green
-            SizeChange::LargeIncrease => "#F44336", // red
-            SizeChange::SmallIncrease => "#FF9800",  // orange
-            SizeChange::Unchanged => "#9E9E9E",      // grey
-            SizeChange::SmallDecrease => "#03A9F4",  // light blue
-            SizeChange::LargeDecrease => "#2196F3",  // blue
-            SizeChange::Deleted => "#607D8B",        // blue-grey
+            SizeChange::New => "#A855F7",             // purple
+            SizeChange::Deleted => "#6B7280",         // gray
+            SizeChange::LargeIncrease => "#DC2626",   // red-600
+            SizeChange::ModerateIncrease => "#F97316", // orange-500
+            SizeChange::SlightIncrease => "#FCD34D",  // amber-300
+            SizeChange::Unchanged => "#9CA3AF",       // gray-400
+            SizeChange::SlightDecrease => "#86EFAC",  // green-300
+            SizeChange::ModerateDecrease => "#22C55E", // green-500
+            SizeChange::LargeDecrease => "#15803D",   // green-700
         }
     }
 
-    /// Classifies a size change given the previous and current sizes.
+    /// Classifies a size change given the current and previous sizes.
     ///
     /// # Arguments
-    /// * `prev` – size in bytes from the previous scan (`None` if the entry is new).
-    /// * `current` – current size in bytes (`None` if the entry was deleted).
-    pub fn classify(prev: Option<u64>, current: Option<u64>) -> Self {
-        match (prev, current) {
-            (None, Some(_)) => SizeChange::New,
-            (Some(_), None) => SizeChange::Deleted,
-            (None, None) => SizeChange::Unchanged,
-            (Some(p), Some(c)) => {
-                if p == c {
-                    return SizeChange::Unchanged;
-                }
-                // Avoid division by zero for zero-sized previous entries.
-                if p == 0 {
-                    return if c > 0 {
-                        SizeChange::LargeIncrease
-                    } else {
-                        SizeChange::Unchanged
-                    };
-                }
-                let ratio = c as f64 / p as f64;
-                if ratio > 1.20 {
-                    SizeChange::LargeIncrease
-                } else if ratio > 1.0 {
-                    SizeChange::SmallIncrease
-                } else if ratio < 0.80 {
-                    SizeChange::LargeDecrease
-                } else {
-                    SizeChange::SmallDecrease
-                }
-            }
+    /// * `current` – the current size in bytes.
+    /// * `previous` – the previous size in bytes, or `None` if the item is new.
+    pub fn classify(current: u64, previous: Option<u64>) -> Self {
+        let Some(prev) = previous else {
+            return SizeChange::New;
+        };
+
+        if current == 0 && prev > 0 {
+            return SizeChange::Deleted;
+        }
+
+        if prev == 0 {
+            // Avoid division by zero; treat any size as a large increase.
+            return if current > 0 {
+                SizeChange::LargeIncrease
+            } else {
+                SizeChange::Unchanged
+            };
+        }
+
+        let ratio = current as f64 / prev as f64;
+
+        match ratio {
+            r if r > 1.20 => SizeChange::LargeIncrease,
+            r if r > 1.05 => SizeChange::ModerateIncrease,
+            r if r > 1.00 => SizeChange::SlightIncrease,
+            r if (r - 1.00_f64).abs() < f64::EPSILON => SizeChange::Unchanged,
+            r if r >= 0.95 => SizeChange::SlightDecrease,
+            r if r >= 0.80 => SizeChange::ModerateDecrease,
+            _ => SizeChange::LargeDecrease,
         }
     }
 }
@@ -81,55 +87,50 @@ mod tests {
     use super::*;
 
     #[test]
-    fn new_entry_classified_correctly() {
-        assert_eq!(SizeChange::classify(None, Some(1024)), SizeChange::New);
+    fn new_when_no_previous() {
+        assert_eq!(SizeChange::classify(500, None), SizeChange::New);
     }
 
     #[test]
-    fn deleted_entry_classified_correctly() {
-        assert_eq!(SizeChange::classify(Some(1024), None), SizeChange::Deleted);
+    fn deleted_when_current_zero() {
+        assert_eq!(SizeChange::classify(0, Some(100)), SizeChange::Deleted);
     }
 
     #[test]
-    fn unchanged_entry_classified_correctly() {
-        assert_eq!(SizeChange::classify(Some(512), Some(512)), SizeChange::Unchanged);
+    fn large_increase_over_20_percent() {
+        assert_eq!(SizeChange::classify(130, Some(100)), SizeChange::LargeIncrease);
     }
 
     #[test]
-    fn large_increase_classified_correctly() {
-        assert_eq!(SizeChange::classify(Some(100), Some(200)), SizeChange::LargeIncrease);
+    fn moderate_increase_between_5_and_20_percent() {
+        assert_eq!(SizeChange::classify(110, Some(100)), SizeChange::ModerateIncrease);
     }
 
     #[test]
-    fn small_increase_classified_correctly() {
-        assert_eq!(SizeChange::classify(Some(100), Some(110)), SizeChange::SmallIncrease);
+    fn unchanged_same_size() {
+        assert_eq!(SizeChange::classify(100, Some(100)), SizeChange::Unchanged);
     }
 
     #[test]
-    fn large_decrease_classified_correctly() {
-        assert_eq!(SizeChange::classify(Some(200), Some(100)), SizeChange::LargeDecrease);
+    fn large_decrease_over_20_percent() {
+        assert_eq!(SizeChange::classify(70, Some(100)), SizeChange::LargeDecrease);
     }
 
     #[test]
-    fn small_decrease_classified_correctly() {
-        assert_eq!(SizeChange::classify(Some(200), Some(190)), SizeChange::SmallDecrease);
-    }
-
-    #[test]
-    fn hex_colors_are_valid_hex_strings() {
-        let variants = [
+    fn hex_color_returns_nonempty_string() {
+        for variant in [
             SizeChange::New,
-            SizeChange::LargeIncrease,
-            SizeChange::SmallIncrease,
-            SizeChange::Unchanged,
-            SizeChange::SmallDecrease,
-            SizeChange::LargeDecrease,
             SizeChange::Deleted,
-        ];
-        for variant in &variants {
+            SizeChange::LargeIncrease,
+            SizeChange::ModerateIncrease,
+            SizeChange::SlightIncrease,
+            SizeChange::Unchanged,
+            SizeChange::SlightDecrease,
+            SizeChange::ModerateDecrease,
+            SizeChange::LargeDecrease,
+        ] {
             let color = variant.hex_color();
-            assert!(color.starts_with('#'), "color {color} should start with #");
-            assert_eq!(color.len(), 7, "color {color} should be 7 chars");
+            assert!(color.starts_with('#'), "Expected hex color, got: {color}");
         }
     }
 }

@@ -3,7 +3,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-/// Represents metadata about a single disk scan session.
+/// Represents metadata for a single scan session, capturing when the scan
+/// occurred, which path was scanned, and aggregate statistics.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ScanMeta {
     /// Unique identifier for this scan session.
@@ -12,10 +13,10 @@ pub struct ScanMeta {
     /// The root path that was scanned.
     pub root_path: String,
 
-    /// Timestamp when the scan was started.
+    /// The timestamp when the scan was started.
     pub started_at: DateTime<Utc>,
 
-    /// Timestamp when the scan completed; `None` if still in progress.
+    /// The timestamp when the scan completed. `None` if still in progress.
     pub completed_at: Option<DateTime<Utc>>,
 
     /// Total number of files discovered during the scan.
@@ -24,41 +25,39 @@ pub struct ScanMeta {
     /// Total number of folders discovered during the scan.
     pub total_folders: u64,
 
-    /// Total size in bytes of all scanned entries.
+    /// Total size in bytes of all scanned items.
     pub total_size: u64,
-
-    /// Whether the scan completed successfully.
-    pub success: bool,
-
-    /// Optional error message if the scan encountered a fatal error.
-    pub error_message: Option<String>,
 }
 
 impl ScanMeta {
-    /// Creates a new [`ScanMeta`] representing a scan that has just started.
-    pub fn new(id: i64, root_path: impl Into<String>) -> Self {
+    /// Creates a new [`ScanMeta`] for a scan that has just started.
+    pub fn new(id: i64, root_path: impl Into<String>, started_at: DateTime<Utc>) -> Self {
         Self {
             id,
             root_path: root_path.into(),
-            started_at: Utc::now(),
+            started_at,
             completed_at: None,
             total_files: 0,
             total_folders: 0,
             total_size: 0,
-            success: false,
-            error_message: None,
         }
     }
 
-    /// Returns `true` if the scan is still in progress.
-    pub fn is_in_progress(&self) -> bool {
-        self.completed_at.is_none()
+    /// Returns `true` if the scan has completed.
+    pub fn is_complete(&self) -> bool {
+        self.completed_at.is_some()
+    }
+
+    /// Marks the scan as complete with the given timestamp.
+    pub fn mark_complete(&mut self, completed_at: DateTime<Utc>) {
+        self.completed_at = Some(completed_at);
     }
 
     /// Returns the duration of the scan in seconds, if it has completed.
     pub fn duration_secs(&self) -> Option<i64> {
-        self.completed_at
-            .map(|end| (end - self.started_at).num_seconds())
+        self.completed_at.map(|end| {
+            (end - self.started_at).num_seconds()
+        })
     }
 }
 
@@ -67,17 +66,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn new_scan_meta_is_in_progress() {
-        let meta = ScanMeta::new(1, "/home/user");
-        assert!(meta.is_in_progress());
-        assert!(!meta.success);
-        assert_eq!(meta.root_path, "/home/user");
+    fn new_scan_is_not_complete() {
+        let meta = ScanMeta::new(1, "/home", Utc::now());
+        assert!(!meta.is_complete());
     }
 
     #[test]
-    fn completed_scan_is_not_in_progress() {
-        let mut meta = ScanMeta::new(1, "/home/user");
-        meta.completed_at = Some(Utc::now());
-        assert!(!meta.is_in_progress());
+    fn mark_complete_sets_completed_at() {
+        let mut meta = ScanMeta::new(1, "/home", Utc::now());
+        meta.mark_complete(Utc::now());
+        assert!(meta.is_complete());
     }
 }

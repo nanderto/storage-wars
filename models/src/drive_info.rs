@@ -2,13 +2,14 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Information about a storage drive or volume.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Describes a storage drive or volume, including its label, total capacity,
+/// and available free space.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DriveInfo {
-    /// Human-readable name of the drive (e.g. `"C:"` on Windows, `"/dev/sda1"` on Linux).
+    /// The system name of the drive (e.g. `"C:"` on Windows, `"/dev/sda1"` on Linux).
     pub name: String,
 
-    /// Volume label assigned by the user or operating system (e.g. `"System"`).
+    /// The human-readable volume label, if one is set.
     pub volume_label: Option<String>,
 
     /// Total capacity of the drive in bytes.
@@ -19,7 +20,7 @@ pub struct DriveInfo {
 }
 
 impl DriveInfo {
-    /// Creates a new [`DriveInfo`] with the given name and space values.
+    /// Creates a new [`DriveInfo`].
     pub fn new(
         name: impl Into<String>,
         volume_label: Option<String>,
@@ -34,18 +35,23 @@ impl DriveInfo {
         }
     }
 
-    /// Returns the used space in bytes.
+    /// Returns the used space in bytes (`total_space - available_space`).
     pub fn used_space(&self) -> u64 {
         self.total_space.saturating_sub(self.available_space)
     }
 
-    /// Returns the percentage of space used as a value between `0.0` and `100.0`.
+    /// Returns the usage ratio as a value between `0.0` and `1.0`.
     /// Returns `0.0` if `total_space` is zero.
-    pub fn used_percent(&self) -> f64 {
+    pub fn usage_ratio(&self) -> f64 {
         if self.total_space == 0 {
             return 0.0;
         }
-        (self.used_space() as f64 / self.total_space as f64) * 100.0
+        self.used_space() as f64 / self.total_space as f64
+    }
+
+    /// Returns the usage percentage (0–100).
+    pub fn usage_percent(&self) -> f64 {
+        self.usage_ratio() * 100.0
     }
 }
 
@@ -54,20 +60,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn used_space_is_total_minus_available() {
-        let drive = DriveInfo::new("C:", Some("System".to_string()), 1_000_000, 400_000);
-        assert_eq!(drive.used_space(), 600_000);
+    fn used_space_is_difference() {
+        let drive = DriveInfo::new("C:", None, 1_000, 400);
+        assert_eq!(drive.used_space(), 600);
     }
 
     #[test]
-    fn used_percent_is_correct() {
-        let drive = DriveInfo::new("C:", None, 1_000_000, 250_000);
-        assert!((drive.used_percent() - 75.0).abs() < f64::EPSILON);
+    fn usage_ratio_zero_when_total_is_zero() {
+        let drive = DriveInfo::new("X:", None, 0, 0);
+        assert_eq!(drive.usage_ratio(), 0.0);
     }
 
     #[test]
-    fn used_percent_zero_when_total_is_zero() {
-        let drive = DriveInfo::new("C:", None, 0, 0);
-        assert_eq!(drive.used_percent(), 0.0);
+    fn usage_percent_correct() {
+        let drive = DriveInfo::new("D:", None, 200, 50);
+        assert!((drive.usage_percent() - 75.0).abs() < f64::EPSILON);
     }
 }
