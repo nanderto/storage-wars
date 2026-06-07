@@ -1,43 +1,158 @@
-//! Scan history panel — 280px-wide focusable list with Base/New selection,
-//! Compare and Delete action buttons.
+//! Scan history panel — a 280 px-wide focusable list of past scans.
 
 use gpui::{
-    div, px, AppContext, Div, FocusHandle, Focusable, IntoElement, ParentElement, Render, Styled,
-    Window,
+    div, prelude::*, px, Context, Element, FocusHandle, Focusable, IntoElement, ParentElement,
+    Render, Styled, Window,
 };
 
-use crate::{
-    theme,
-    types::{format_bytes, HistorySelection, ScanRecord},
+use crate::theme::{
+    COLOR_ACCENT, COLOR_BACKGROUND, COLOR_BORDER, COLOR_SURFACE, COLOR_TEXT_PRIMARY,
+    COLOR_TEXT_SECONDARY, SCAN_HISTORY_WIDTH_PX,
 };
 
-/// Scan history side panel.
+/// Represents a single recorded scan.
+#[derive(Debug, Clone)]
+pub struct ScanRecord {
+    pub id: u64,
+    pub label: String,
+    pub drive_path: String,
+    pub timestamp: String,
+    pub total_bytes: u64,
+}
+
+/// Selection role for a scan record in a comparison.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScanRole {
+    Base,
+    New,
+}
+
+/// 280 px-wide focusable panel listing scan history.
 pub struct ScanHistory {
     focus_handle: FocusHandle,
     records: Vec<ScanRecord>,
-    selection: HistorySelection,
+    base_id: Option<u64>,
+    new_id: Option<u64>,
+    hovered_id: Option<u64>,
 }
 
 impl ScanHistory {
-    pub fn new(records: Vec<ScanRecord>, cx: &mut gpui::Context<Self>) -> Self {
+    /// Creates a new empty [`ScanHistory`].
+    pub fn new() -> Self {
+        panic!("ScanHistory must be constructed inside a GPUI context via ScanHistory::build(cx)")
+    }
+
+    /// Constructs the panel within a GPUI context.
+    pub fn build(cx: &mut Context<Self>) -> Self {
         Self {
             focus_handle: cx.focus_handle(),
-            records,
-            selection: HistorySelection::default(),
+            records: Vec::new(),
+            base_id: None,
+            new_id: None,
+            hovered_id: None,
         }
     }
 
+    /// Replaces the scan record list.
     pub fn set_records(&mut self, records: Vec<ScanRecord>) {
         self.records = records;
     }
 
-    // ── rendering helpers ─────────────────────────────────────────────────────
+    /// Returns the currently selected base scan, if any.
+    pub fn base_record(&self) -> Option<&ScanRecord> {
+        self.base_id
+            .and_then(|id| self.records.iter().find(|r| r.id == id))
+    }
 
-    fn render_record_row(&self, record: &ScanRecord) -> Div {
-        let is_base = self.selection.base_id == Some(record.id);
-        let is_new = self.selection.new_id == Some(record.id);
+    /// Returns the currently selected new scan, if any.
+    pub fn new_record(&self) -> Option<&ScanRecord> {
+        self.new_id
+            .and_then(|id| self.records.iter().find(|r| r.id == id))
+    }
 
-        let badge = if is_base {
+    /// Returns `true` if both a base and a new scan are selected.
+    pub fn can_compare(&self) -> bool {
+        self.base_id.is_some() && self.new_id.is_some() && self.base_id != self.new_id
+    }
+}
+
+impl Default for ScanHistory {
+    fn default() -> Self {
+        panic!("ScanHistory must be constructed with ScanHistory::build(cx)")
+    }
+}
+
+impl Focusable for ScanHistory {
+    fn focus_handle(&self, _cx: &gpui::App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+
+impl Render for ScanHistory {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .w(px(SCAN_HISTORY_WIDTH_PX))
+            .h_full()
+            .bg(COLOR_SURFACE)
+            .border_r_1()
+            .border_color(COLOR_BORDER)
+            // Panel header
+            .child(self.render_panel_header())
+            // Scrollable scan list
+            .child(self.render_scan_list())
+            // Action buttons
+            .child(self.render_action_buttons())
+    }
+}
+
+impl ScanHistory {
+    fn render_panel_header(&self) -> impl IntoElement {
+        div()
+            .flex()
+            .items_center()
+            .w_full()
+            .h(px(32.0))
+            .px(px(8.0))
+            .border_b_1()
+            .border_color(COLOR_BORDER)
+            .text_color(COLOR_TEXT_SECONDARY)
+            .child("Scan History")
+    }
+
+    fn render_scan_list(&self) -> impl IntoElement {
+        let mut list = div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .overflow_hidden()
+            .bg(COLOR_BACKGROUND);
+
+        if self.records.is_empty() {
+            list = list.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .flex_1()
+                    .text_color(COLOR_TEXT_SECONDARY)
+                    .child("No scans yet"),
+            );
+        } else {
+            for record in &self.records {
+                list = list.child(self.render_scan_row(record));
+            }
+        }
+
+        list
+    }
+
+    fn render_scan_row(&self, record: &ScanRecord) -> impl IntoElement {
+        let is_base = self.base_id == Some(record.id);
+        let is_new = self.new_id == Some(record.id);
+
+        let role_badge = if is_base {
             Some("Base")
         } else if is_new {
             Some("New")
@@ -46,176 +161,81 @@ impl ScanHistory {
         };
 
         let badge_color = if is_base {
-            theme::COLOR_ACCENT
+            COLOR_ACCENT
         } else {
-            theme::COLOR_SIZE_DECREASED
-        };
-
-        let row_bg = if is_base || is_new {
-            theme::COLOR_SELECTED
-        } else {
-            theme::COLOR_SURFACE
+            COLOR_TEXT_SECONDARY
         };
 
         div()
             .flex()
             .flex_col()
             .w_full()
-            .h(px(theme::HISTORY_ROW_HEIGHT))
-            .px(px(theme::SPACING_MD))
-            .py(px(theme::SPACING_XS))
-            .bg(row_bg)
+            .px(px(8.0))
+            .py(px(4.0))
             .border_b_1()
-            .border_color(theme::COLOR_BORDER)
+            .border_color(COLOR_BORDER)
+            // Row header: label + optional role badge
             .child(
                 div()
                     .flex()
                     .flex_row()
                     .items_center()
                     .justify_between()
-                    .w_full()
                     .child(
                         div()
-                            .text_color(theme::COLOR_TEXT_PRIMARY)
-                            .text_size(px(theme::FONT_SIZE_SM))
-                            .overflow_hidden()
+                            .text_color(COLOR_TEXT_PRIMARY)
                             .child(record.label.clone()),
                     )
-                    .child(if let Some(b) = badge {
+                    .child(
                         div()
-                            .px(px(theme::SPACING_XS))
-                            .py(px(2.0))
-                            .rounded(px(3.0))
-                            .bg(badge_color)
-                            .text_color(theme::COLOR_BACKGROUND)
-                            .text_size(px(10.0))
-                            .child(b)
-                    } else {
-                        div()
-                    }),
+                            .text_color(badge_color)
+                            .child(role_badge.unwrap_or("")),
+                    ),
             )
+            // Subtitle: drive + timestamp
             .child(
                 div()
                     .flex()
                     .flex_row()
-                    .items_center()
-                    .justify_between()
-                    .w_full()
-                    .child(
-                        div()
-                            .text_color(theme::COLOR_TEXT_MUTED)
-                            .text_size(px(10.0))
-                            .child(record.scanned_at.clone()),
-                    )
-                    .child(
-                        div()
-                            .text_color(theme::COLOR_TEXT_SECONDARY)
-                            .text_size(px(10.0))
-                            .child(format_bytes(record.total_bytes)),
-                    ),
+                    .gap(px(8.0))
+                    .text_color(COLOR_TEXT_SECONDARY)
+                    .child(record.drive_path.clone())
+                    .child(record.timestamp.clone()),
             )
     }
 
-    fn render_action_buttons(&self) -> Div {
-        let can_compare =
-            self.selection.base_id.is_some() && self.selection.new_id.is_some();
+    fn render_action_buttons(&self) -> impl IntoElement {
+        let can_compare = self.can_compare();
 
         div()
             .flex()
             .flex_row()
-            .items_center()
-            .gap(px(theme::SPACING_SM))
+            .gap(px(8.0))
             .w_full()
-            .p(px(theme::SPACING_SM))
-            .bg(theme::COLOR_SURFACE)
+            .h(px(40.0))
+            .px(px(8.0))
+            .items_center()
             .border_t_1()
-            .border_color(theme::COLOR_BORDER)
-            .child(
-                div()
-                    .flex()
-                    .flex_1()
-                    .items_center()
-                    .justify_center()
-                    .h(px(28.0))
-                    .rounded(px(4.0))
-                    .bg(if can_compare {
-                        theme::COLOR_ACCENT
-                    } else {
-                        theme::COLOR_BUTTON_BG
-                    })
-                    .text_color(if can_compare {
-                        theme::COLOR_BACKGROUND
-                    } else {
-                        theme::COLOR_TEXT_MUTED
-                    })
-                    .text_size(px(theme::FONT_SIZE_SM))
-                    .child("Compare"),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .h(px(28.0))
-                    .px(px(theme::SPACING_MD))
-                    .rounded(px(4.0))
-                    .bg(theme::COLOR_BUTTON_BG)
-                    .text_color(theme::COLOR_BUTTON_DANGER)
-                    .text_size(px(theme::FONT_SIZE_SM))
-                    .child("Delete"),
-            )
+            .border_color(COLOR_BORDER)
+            .child(self.render_button("Compare", can_compare))
+            .child(self.render_button("Delete", !self.records.is_empty()))
     }
-}
 
-impl Render for ScanHistory {
-    fn render(&mut self, _window: &mut Window, _cx: &mut gpui::Context<Self>) -> impl IntoElement {
-        let rows: Vec<Div> = self
-            .records
-            .iter()
-            .map(|r| self.render_record_row(r))
-            .collect();
-
+    fn render_button(&self, label: &'static str, enabled: bool) -> impl IntoElement {
         div()
             .flex()
-            .flex_col()
-            .w(px(theme::SCAN_HISTORY_WIDTH))
-            .h_full()
-            .bg(theme::COLOR_SURFACE)
-            .border_r_1()
-            .border_color(theme::COLOR_BORDER)
-            .track_focus(&self.focus_handle)
-            // Header
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .w_full()
-                    .h(px(theme::TREE_ROW_HEIGHT))
-                    .px(px(theme::SPACING_MD))
-                    .bg(theme::COLOR_SURFACE)
-                    .border_b_1()
-                    .border_color(theme::COLOR_BORDER)
-                    .text_color(theme::COLOR_TEXT_SECONDARY)
-                    .text_size(px(theme::FONT_SIZE_SM))
-                    .child("Scan History"),
-            )
-            // Scrollable list
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .w_full()
-                    .overflow_y_scroll()
-                    .children(rows),
-            )
-            // Action buttons pinned to bottom
-            .child(self.render_action_buttons())
-    }
-}
-
-impl Focusable for ScanHistory {
-    fn focus_handle(&self, _cx: &AppContext) -> FocusHandle {
-        self.focus_handle.clone()
+            .items_center()
+            .justify_center()
+            .px(px(10.0))
+            .py(px(3.0))
+            .rounded(px(4.0))
+            .border_1()
+            .border_color(if enabled { COLOR_ACCENT } else { COLOR_BORDER })
+            .text_color(if enabled {
+                COLOR_ACCENT
+            } else {
+                COLOR_TEXT_SECONDARY
+            })
+            .child(label)
     }
 }

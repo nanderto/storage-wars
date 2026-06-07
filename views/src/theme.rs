@@ -1,61 +1,55 @@
-//! Design tokens — colours, spacing, typography used across all view components.
+//! Shared theme constants used across view components.
 
-use gpui::{rgb, Rgba};
+use gpui::{Hsla, hsla};
 
-// ── Palette ──────────────────────────────────────────────────────────────────
+/// Background color for the main application surface.
+pub const COLOR_BACKGROUND: Hsla = hsla(0.0, 0.0, 0.12, 1.0);
 
-pub const COLOR_BACKGROUND: Rgba = rgb(0x1E1E2E);
-pub const COLOR_SURFACE: Rgba = rgb(0x27273A);
-pub const COLOR_SURFACE_RAISED: Rgba = rgb(0x313145);
-pub const COLOR_BORDER: Rgba = rgb(0x45455F);
-pub const COLOR_TEXT_PRIMARY: Rgba = rgb(0xCDD6F4);
-pub const COLOR_TEXT_SECONDARY: Rgba = rgb(0x9399B2);
-pub const COLOR_TEXT_MUTED: Rgba = rgb(0x6C7086);
-pub const COLOR_ACCENT: Rgba = rgb(0x89B4FA);
-pub const COLOR_ACCENT_HOVER: Rgba = rgb(0xB4D0FF);
-pub const COLOR_SELECTED: Rgba = rgb(0x313F5A);
-pub const COLOR_SELECTED_BORDER: Rgba = rgb(0x89B4FA);
+/// Surface color for panels and cards.
+pub const COLOR_SURFACE: Hsla = hsla(0.0, 0.0, 0.16, 1.0);
 
-/// Progress bar / size-change colours.
-pub const COLOR_SIZE_INCREASED: Rgba = rgb(0xF38BA8);
-pub const COLOR_SIZE_DECREASED: Rgba = rgb(0xA6E3A1);
-pub const COLOR_SIZE_UNCHANGED: Rgba = rgb(0x89B4FA);
+/// Border color for interactive elements.
+pub const COLOR_BORDER: Hsla = hsla(0.0, 0.0, 0.25, 1.0);
 
-pub const COLOR_BUTTON_BG: Rgba = rgb(0x313145);
-pub const COLOR_BUTTON_BG_HOVER: Rgba = rgb(0x45455F);
-pub const COLOR_BUTTON_DANGER: Rgba = rgb(0xF38BA8);
-pub const COLOR_BUTTON_DANGER_HOVER: Rgba = rgb(0xFAA8B8);
+/// Primary text color.
+pub const COLOR_TEXT_PRIMARY: Hsla = hsla(0.0, 0.0, 0.92, 1.0);
 
-pub const COLOR_TITLE_BAR_BG: Rgba = rgb(0x181825);
-pub const COLOR_WINDOW_CONTROL_CLOSE: Rgba = rgb(0xF38BA8);
-pub const COLOR_WINDOW_CONTROL_MINIMIZE: Rgba = rgb(0xF9E2AF);
-pub const COLOR_WINDOW_CONTROL_MAXIMIZE: Rgba = rgb(0xA6E3A1);
+/// Secondary / muted text color.
+pub const COLOR_TEXT_SECONDARY: Hsla = hsla(0.0, 0.0, 0.60, 1.0);
 
-// ── Spacing ───────────────────────────────────────────────────────────────────
+/// Accent / highlight color.
+pub const COLOR_ACCENT: Hsla = hsla(0.60, 0.80, 0.55, 1.0);
 
-pub const SPACING_XS: f32 = 4.0;
-pub const SPACING_SM: f32 = 8.0;
-pub const SPACING_MD: f32 = 12.0;
-pub const SPACING_LG: f32 = 16.0;
-pub const SPACING_XL: f32 = 24.0;
+/// Color used when a size has grown compared to the previous scan.
+pub const COLOR_SIZE_GREW: Hsla = hsla(0.0, 0.75, 0.55, 1.0);
 
-/// Indentation per depth level in the tree view (px).
+/// Color used when a size has shrunk compared to the previous scan.
+pub const COLOR_SIZE_SHRANK: Hsla = hsla(0.33, 0.65, 0.45, 1.0);
+
+/// Color used when a size is unchanged compared to the previous scan.
+pub const COLOR_SIZE_UNCHANGED: Hsla = hsla(0.0, 0.0, 0.45, 1.0);
+
+/// Indentation step in pixels per depth level for the tree view.
 pub const TREE_INDENT_PX: f32 = 16.0;
 
-/// Fixed width of the scan-history panel (px).
-pub const SCAN_HISTORY_WIDTH: f32 = 280.0;
+/// Fixed width of the [`ScanHistory`] panel in pixels.
+pub const SCAN_HISTORY_WIDTH_PX: f32 = 280.0;
 
-// ── Typography ────────────────────────────────────────────────────────────────
+/// Represents the direction of size change between two scans.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SizeChange {
+    Grew,
+    Shrank,
+    Unchanged,
+}
 
-pub const FONT_SIZE_SM: f32 = 12.0;
-pub const FONT_SIZE_MD: f32 = 14.0;
-pub const FONT_SIZE_LG: f32 = 16.0;
-
-// ── Dimensions ────────────────────────────────────────────────────────────────
-
-pub const TITLE_BAR_HEIGHT: f32 = 32.0;
-pub const DRIVE_SELECTOR_HEIGHT: f32 = 36.0;
-pub const TREE_ROW_HEIGHT: f32 = 28.0;
-pub const HISTORY_ROW_HEIGHT: f32 = 48.0;
-pub const WINDOW_CONTROL_SIZE: f32 = 12.0;
-pub const PROGRESS_BAR_HEIGHT: f32 = 6.0;
+impl SizeChange {
+    /// Returns the theme color associated with this change direction.
+    pub fn color(self) -> Hsla {
+        match self {
+            SizeChange::Grew => COLOR_SIZE_GREW,
+            SizeChange::Shrank => COLOR_SIZE_SHRANK,
+            SizeChange::Unchanged => COLOR_SIZE_UNCHANGED,
+        }
+    }
+}

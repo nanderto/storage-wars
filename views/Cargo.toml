@@ -3,33 +3,31 @@ name = "views"
 version = "0.1.0"
 edition = "2021"
 description = "GPUI view components for disk space analyzer"
-authors = []
-
-[[bin]]
-name = "views"
-path = "src/main.rs"
+build = "build.rs"
 
 [lib]
 name = "views"
 path = "src/lib.rs"
 
+[[bin]]
+name = "views"
+path = "src/main.rs"
+
 [dependencies]
 gpui = { git = "https://github.com/zed-industries/zed", rev = "main" }
-anyhow = "1.0"
 log = "0.4"
 env_logger = "0.11"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
 
 [dev-dependencies]
-pretty_assertions = "1.4"
+# No additional dev deps needed for scaffold
 
 [profile.dev]
 opt-level = 0
 debug = true
+incremental = true
 
 [profile.release]
 opt-level = 3
-lto = true
+lto = "thin"
 codegen-units = 1
-strip = true
+strip = "symbols"

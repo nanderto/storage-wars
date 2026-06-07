@@ -1,7 +1,14 @@
 [build]
-# Ensure proc-macro crates are built for the host when cross-compiling.
-# Uncomment and set target when cross-compiling:
-# target = "x86_64-unknown-linux-gnu"
+rustflags = []
 
-[net]
-git-fetch-with-cli = true
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+
+[target.x86_64-apple-darwin]
+rustflags = []
+
+[target.aarch64-apple-darwin]
+rustflags = []
+
+[target.x86_64-pc-windows-msvc]
+rustflags = []
