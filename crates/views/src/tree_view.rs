@@ -1,5 +1,3 @@
-// TreeView: Renders hierarchical file/folder list as a table.
-//
-// Columns: Name, % Parent, Size, Prev Size, % Prev, Files, Folders, Modified.
-// Features: chevrons, file/folder icons, indentation (16px per depth level),
-// progress bars with SizeChange colors.
+// TreeView: renders hierarchical file list with columns
+// (Name, % Parent, Size, Prev Size, % Prev, Files, Folders, Modified),
+// chevrons, icons, indentation (16px/depth), progress bars with SizeChange colors.
