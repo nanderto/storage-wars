@@ -1,6 +1,9 @@
-[workspace]
-resolver = "2"
-members = [
-    "crates/models",
-    "crates/tree_ops",
-]
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -1,5 +1,6 @@
+ [workspace]
+ members = [
+     "crates/models",
++    "crates/tree_ops",
+ ]
+ resolver = "2"
