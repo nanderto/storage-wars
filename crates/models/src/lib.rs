@@ -1,4 +1,4 @@
-/// Metadata for a scan session.
+/// Metadata for a single scan session.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ScanMeta {
     pub id: i64,
@@ -31,10 +31,9 @@ pub struct DbNode {
     pub path: String,
     pub size: u64,
     pub is_dir: bool,
-    pub modified: String,
 }
 
-/// Information about a drive/volume.
+/// Information about a drive / volume.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DriveInfo {
     pub name: String,
@@ -43,16 +42,18 @@ pub struct DriveInfo {
     pub available_space: u64,
 }
 
-/// Wrapper around FsNode for UI display purposes.
+/// Wrapper around FsNode for UI presentation.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiNode {
-    pub node: FsNode,
+    pub name: String,
+    pub path: String,
+    pub size: u64,
     pub depth: u32,
     pub expanded: bool,
-    pub scan_progress: f64,
+    pub scan_progress: f32,
 }
 
-/// Represents a size change with classification and display color.
+/// Represents a size delta with a display color.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SizeChange {
     pub delta: i64,
@@ -60,10 +61,10 @@ pub struct SizeChange {
     pub hex_color: String,
 }
 
-/// Messages emitted during a scan operation.
+/// Messages emitted during a scan.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ScanMessage {
     DirScanned { path: String, size: u64 },
-    ScanError { path: String, error: String },
-    Complete { total_size: u64 },
+    ScanError { path: String, message: String },
+    Complete { scan_id: i64 },
 }
