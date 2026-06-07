@@ -1,9 +1,9 @@
 /// Information about a mounted drive / volume.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DriveInfo {
-    /// Mount point or drive letter path (e.g. "C:\\").
+    /// OS-level drive name or mount point (e.g. "C:\\").
     pub name: String,
-    /// Volume label reported by the OS (may be empty).
+    /// Volume label assigned by the user/OS.
     pub volume_label: String,
     /// Total capacity in bytes.
     pub total_space: u64,
