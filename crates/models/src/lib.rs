@@ -10,7 +10,7 @@ pub struct FsNode {
     pub path: PathBuf,
 }
 
-/// Represents a flattened UI-ready view of an FsNode.
+/// Represents a flattened UI-ready node derived from an FsNode.
 #[derive(Debug, Clone)]
 pub struct UiNode {
     pub name: String,
