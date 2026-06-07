@@ -1,47 +1,48 @@
-use gpui::AppContext;
-use log::debug;
+use gpui::{Hsla, Rgba};
 
-/// Dark colour palette used throughout the application.
-pub struct DarkTheme {
-    pub background: gpui::Rgba,
-    pub surface: gpui::Rgba,
-    pub surface_elevated: gpui::Rgba,
-    pub border: gpui::Rgba,
-    pub text_primary: gpui::Rgba,
-    pub text_secondary: gpui::Rgba,
-    pub text_muted: gpui::Rgba,
-    pub accent: gpui::Rgba,
-    pub accent_hover: gpui::Rgba,
-    pub danger: gpui::Rgba,
-    pub success: gpui::Rgba,
-    pub warning: gpui::Rgba,
+/// Dark theme palette for Storage Wars.
+#[derive(Debug, Clone, Copy)]
+pub struct StorageWarsTheme {
+    /// Main window background.
+    pub background: Hsla,
+    /// Primary foreground / text colour.
+    pub foreground: Hsla,
+    /// Title-bar background (slightly lighter than window bg).
+    pub title_bar_background: Hsla,
+    /// Title-bar text / icon colour.
+    pub title_bar_foreground: Hsla,
+    /// Accent colour used for interactive elements.
+    pub accent: Hsla,
+    /// Subtle border colour.
+    pub border: Hsla,
+    /// Surface colour for cards / panels.
+    pub surface: Hsla,
+    /// Muted text colour.
+    pub muted: Hsla,
 }
 
-impl Default for DarkTheme {
-    fn default() -> Self {
+impl StorageWarsTheme {
+    /// Construct the canonical dark theme.
+    pub fn dark() -> Self {
         Self {
-            background: gpui::rgb(0x1a1a2e),
-            surface: gpui::rgb(0x16213e),
-            surface_elevated: gpui::rgb(0x0f3460),
-            border: gpui::rgb(0x2a2a4a),
-            text_primary: gpui::rgb(0xe0e0e0),
-            text_secondary: gpui::rgb(0xa0a0b0),
-            text_muted: gpui::rgb(0x606070),
-            accent: gpui::rgb(0xe94560),
-            accent_hover: gpui::rgb(0xff6b7a),
-            danger: gpui::rgb(0xff4757),
-            success: gpui::rgb(0x2ed573),
-            warning: gpui::rgb(0xffa502),
+            background: rgba_to_hsla(0x0d0d0dff),
+            foreground: rgba_to_hsla(0xe8e8e8ff),
+            title_bar_background: rgba_to_hsla(0x141414ff),
+            title_bar_foreground: rgba_to_hsla(0xd0d0d0ff),
+            accent: rgba_to_hsla(0x4a9effff),
+            border: rgba_to_hsla(0x2a2a2aff),
+            surface: rgba_to_hsla(0x1a1a1aff),
+            muted: rgba_to_hsla(0x6b6b6bff),
         }
     }
 }
 
-/// Apply the dark theme to the GPUI application context.
-///
-/// This is called once during startup before any windows are opened.
-pub fn apply_dark_theme(_cx: &mut AppContext) {
-    debug!("Applying dark theme");
-    // Theme tokens are accessed via `DarkTheme::default()` throughout the
-    // component tree. Future iterations can store the active theme in a
-    // global GPUI model here.
+/// Convert a packed `0xRRGGBBAA` hex literal into an [`Hsla`] colour.
+fn rgba_to_hsla(packed: u32) -> Hsla {
+    let r = ((packed >> 24) & 0xff) as f32 / 255.0;
+    let g = ((packed >> 16) & 0xff) as f32 / 255.0;
+    let b = ((packed >> 8) & 0xff) as f32 / 255.0;
+    let a = (packed & 0xff) as f32 / 255.0;
+
+    Rgba { r, g, b, a }.into()
 }

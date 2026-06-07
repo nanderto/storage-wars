@@ -1,79 +1,40 @@
-use gpui::{
-    div, px, App, Context, Entity, IntoElement, ParentElement, Render, Styled, Window,
-};
+use gpui::{div, px, App, Context, Element, IntoElement, ParentElement, Styled};
 
-/// Custom title bar rendered inside the GPUI window.
+use crate::theme::StorageWarsTheme;
+
+/// Thin custom title-bar rendered inside the GPUI window.
 ///
-/// Replaces the OS-native chrome so we can apply the dark theme consistently
-/// across all platforms.
-pub struct TitleBar {
-    title: String,
-}
+/// On macOS the native traffic-light buttons are positioned by the
+/// [`TitlebarOptions`] in `main.rs`; this bar provides the visual
+/// background strip and application title text.
+pub struct TitleBar;
 
 impl TitleBar {
-    pub fn new(_cx: &mut Context<Self>) -> Self {
-        Self {
-            title: "Storage Wars".to_string(),
-        }
-    }
-}
+    /// Return a renderable element for the title bar.
+    pub fn render(theme: &StorageWarsTheme, _cx: &mut Context<impl gpui::EventEmitter<()> + 'static>) -> impl IntoElement {
+        let bg = theme.title_bar_background;
+        let fg = theme.title_bar_foreground;
+        let border = theme.border;
 
-impl Render for TitleBar {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .flex()
             .flex_row()
             .items_center()
-            .justify_between()
+            .justify_center()
             .w_full()
             .h(px(40.0))
-            .px(px(16.0))
-            .bg(gpui::rgb(0x16213e))
+            .bg(bg)
             .border_b_1()
-            .border_color(gpui::rgb(0x2a2a4a))
-            // Window drag region — the entire title bar can be used to move the window.
+            .border_color(border)
+            // Leave room for macOS traffic lights on the left.
+            .pl(px(80.0))
+            .pr(px(16.0))
             .child(
                 div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(
-                        // Application icon placeholder
-                        div()
-                            .w(px(20.0))
-                            .h(px(20.0))
-                            .rounded(px(4.0))
-                            .bg(gpui::rgb(0xe94560)),
-                    )
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .text_color(gpui::rgb(0xe0e0e0))
-                            .child(self.title.clone()),
-                    ),
-            )
-            .child(
-                // Window controls placeholder (close / minimise / maximise)
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(window_control_button(gpui::rgb(0xff5f57)))
-                    .child(window_control_button(gpui::rgb(0xffbd2e)))
-                    .child(window_control_button(gpui::rgb(0x28c840))),
+                    .text_sm()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(fg)
+                    .child("Storage Wars"),
             )
     }
-}
-
-/// Render a single circular window-control button.
-fn window_control_button(color: gpui::Rgba) -> impl IntoElement {
-    div()
-        .w(px(12.0))
-        .h(px(12.0))
-        .rounded_full()
-        .bg(color)
-        .cursor_pointer()
 }

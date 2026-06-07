@@ -1,16 +1,12 @@
 [build]
-# Use the system linker for faster incremental builds on Linux.
-# On macOS the default linker is already fast enough.
+# Improve incremental compile times during development.
+incremental = true
 
-[target.x86_64-unknown-linux-gnu]
-linker = "clang"
+[target.'cfg(target_os = "macos")']
 rustflags = ["-C", "link-arg=-fuse-ld=lld"]
 
-[target.aarch64-apple-darwin]
-rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+[target.'cfg(target_os = "linux")']
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
 
-[target.x86_64-apple-darwin]
-rustflags = ["-C", "link-arg=-fuse-ld=lld"]
-
-[target.x86_64-pc-windows-msvc]
-rustflags = ["-C", "link-arg=/LTCG"]
+[target.'cfg(target_os = "windows")']
+rustflags = []

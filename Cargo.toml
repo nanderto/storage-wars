@@ -1,8 +1,6 @@
 [workspace]
-members = ["views"]
+members = ["crates/storage-wars"]
 resolver = "2"
 
 [workspace.dependencies]
-anyhow = "1.0"
-log = "0.4"
-serde = { version = "1.0", features = ["derive"] }
+gpui = { git = "https://github.com/zed-industries/zed", rev = "main" }
