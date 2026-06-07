@@ -1,81 +1,93 @@
-//! Binary entry point for the `scanner` component.
+//! Scanner binary entry point.
 //!
-//! Demonstrates [`scan_dir_incremental`] by scanning the path supplied as the
-//! first command-line argument (defaults to the current directory).
+//! Demonstrates the scanner component by scanning the current directory
+//! using all three available scanning strategies.
 
-use std::{
-    env,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
-use scanner::{scan_dir_incremental, ScanMessage};
+use scanner::{read_dir_immediate, scan_dir_incremental, scan_dir_sync, ScanMessage};
 
 fn main() {
-    let root = env::args().nth(1).unwrap_or_else(|| ".".to_string());
+    let root = PathBuf::from(".");
 
-    println!("Scanning: {root}");
+    println!("=== Scanner Demo ===\n");
 
-    let cancelled = Arc::new(AtomicBool::new(false));
-
-    // Allow Ctrl-C to cancel the scan gracefully.
-    {
-        let cancelled = Arc::clone(&cancelled);
-        ctrlc_handler(cancelled);
+    // -------------------------------------------------------------------------
+    // 1. read_dir_immediate — single directory level
+    // -------------------------------------------------------------------------
+    println!("--- read_dir_immediate ---");
+    match read_dir_immediate(&root) {
+        Ok(entries) => {
+            println!("Found {} entries in '{}':", entries.len(), root.display());
+            for entry in &entries {
+                println!("  {:?}", entry);
+            }
+        }
+        Err(e) => eprintln!("read_dir_immediate error: {}", e),
     }
+    println!();
 
-    let rx = scan_dir_incremental(&root, Arc::clone(&cancelled));
+    // -------------------------------------------------------------------------
+    // 2. scan_dir_sync — recursive single-threaded with bottom-up size aggregation
+    // -------------------------------------------------------------------------
+    println!("--- scan_dir_sync ---");
+    let cancelled = Arc::new(AtomicBool::new(false));
+    match scan_dir_sync(&root, Arc::clone(&cancelled)) {
+        Ok(node) => {
+            println!(
+                "Scanned '{}': total size = {} bytes, children = {}",
+                node.path.display(),
+                node.size,
+                node.children.len()
+            );
+        }
+        Err(e) => eprintln!("scan_dir_sync error: {}", e),
+    }
+    println!();
 
-    let mut dir_count: u64 = 0;
-    let mut file_count: u64 = 0;
-    let mut error_count: u64 = 0;
+    // -------------------------------------------------------------------------
+    // 3. scan_dir_incremental — multi-threaded with message channel
+    // -------------------------------------------------------------------------
+    println!("--- scan_dir_incremental ---");
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let (tx, rx) = std::sync::mpsc::channel::<ScanMessage>();
+
+    let scan_root = root.clone();
+    let scan_cancelled = Arc::clone(&cancelled);
+    let handle = std::thread::spawn(move || {
+        scan_dir_incremental(scan_root, tx, scan_cancelled);
+    });
+
+    let mut dir_count: usize = 0;
+    let mut error_count: usize = 0;
 
     for msg in rx {
         match msg {
-            ScanMessage::DirScanned { dir, entries } => {
+            ScanMessage::DirScanned(node) => {
                 dir_count += 1;
-                for entry in &entries {
-                    if !entry.is_dir {
-                        file_count += 1;
-                    }
-                }
                 println!(
-                    "[DIR] {} ({} entries)",
-                    dir.display(),
-                    entries.len()
+                    "  [DirScanned] {} ({} bytes)",
+                    node.path.display(),
+                    node.size
                 );
             }
-            ScanMessage::ScanError { path, message } => {
+            ScanMessage::ScanError { path, error } => {
                 error_count += 1;
-                eprintln!("[ERR] {}: {}", path.display(), message);
+                eprintln!("  [ScanError] {}: {}", path.display(), error);
             }
             ScanMessage::Complete => {
+                println!("  [Complete]");
                 break;
             }
         }
     }
 
-    let status = if cancelled.load(Ordering::Acquire) {
-        "cancelled"
-    } else {
-        "complete"
-    };
+    handle.join().expect("scanner thread panicked");
 
     println!(
-        "\nScan {status}: {dir_count} dirs, {file_count} files, {error_count} errors."
+        "\nIncremental scan finished: {} dirs scanned, {} errors.",
+        dir_count, error_count
     );
-}
-
-/// Register a Ctrl-C handler that sets the `cancelled` flag.
-///
-/// Uses a simple `std`-only approach: spawn a background thread that parks
-/// itself; the OS signal will interrupt the park on supported platforms.
-/// For a production binary, replace this with the `ctrlc` crate.
-fn ctrlc_handler(cancelled: Arc<AtomicBool>) {
-    // This is a best-effort no-dependency handler.
-    // On Unix the process will receive SIGINT; we rely on the default handler
-    // terminating the process if the flag approach is insufficient.
-    let _ = cancelled; // suppress unused warning when signal handling is omitted
 }

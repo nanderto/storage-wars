@@ -1,3 +1,7 @@
 [build]
-# Emit coloured diagnostics even when stdout is redirected.
-rustflags = ["-C", "target-cpu=native"]
+# Use all available CPUs during compilation.
+jobs = 0
+
+[profile.dev]
+# Faster incremental builds during development.
+incremental = true

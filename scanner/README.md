@@ -1,17 +1,15 @@
 # scanner
 
-Multi-threaded filesystem scanner built with Rust `std::thread`.
+Multi-threaded filesystem scanner component written in Rust using `std::thread`.
 
 ## Architecture
 
-| Function | Description |
-|---|---|
-| `scan_dir_incremental` | Spawns up to 8 worker threads pulling from a shared work queue (protected by a `Mutex` + `Condvar`). Sends `ScanMessage` (`DirScanned` / `ScanError` / `Complete`) to the caller via an `mpsc` channel. |
-| `read_dir_immediate` | Reads one directory level and returns entries immediately (non-recursive). |
-| `scan_dir_sync` | Recursive single-threaded scan with bottom-up size aggregation. |
+The crate exposes three scanning strategies:
 
-All operations:
-- Respect an `Arc<AtomicBool>` cancellation flag.
-- Silently skip permission errors.
+| Function | Strategy | Threads |
+|---|---|---|
+| `read_dir_immediate` | Single directory level | 1 (caller) |
+| `scan_dir_sync` | Recursive, bottom-up size aggregation | 1 (caller) |
+| `scan_dir_incremental` | Work-queue driven, sends `ScanMessage` events | up to 8 |
 
-## Build
+### `scan_dir_incremental`

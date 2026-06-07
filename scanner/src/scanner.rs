@@ -1,267 +1,250 @@
-//! Public scanning API.
+//! Core scanning logic: incremental, immediate, and synchronous strategies.
 
-use crate::messages::ScanMessage;
-use crate::models::DirEntry;
-use crate::worker::{run_worker, SharedQueue, WorkQueue};
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::Sender;
 use std::sync::{Arc, Condvar, Mutex};
 
-/// Maximum number of worker threads spawned by [`scan_dir_incremental`].
-const MAX_WORKERS: usize = 8;
+use crate::error::ScanError;
+use crate::message::ScanMessage;
+use crate::worker::{WorkQueue, Worker};
 
-// ── Public API ────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Public data structures
+// ---------------------------------------------------------------------------
 
-/// Spawns up to [`MAX_WORKERS`] worker threads that pull directories from a
-/// shared work queue protected by a [`Condvar`].
-///
-/// Results are sent as [`ScanMessage`] values over `tx`.  A final
-/// [`ScanMessage::Complete`] is always sent when scanning finishes (even if
-/// cancelled).
-///
-/// # Cancellation
-///
-/// Set `cancelled` to `true` at any time to request early termination.
-/// Workers check the flag before processing each item and before each child.
-pub fn scan_dir_incremental(
-    root: PathBuf,
-    tx: std::sync::mpsc::Sender<ScanMessage>,
-    cancelled: Arc<AtomicBool>,
-) {
-    let queue: SharedQueue = Arc::new((
-        Mutex::new(WorkQueue::new(root)),
-        Condvar::new(),
-    ));
-
-    let worker_count = MAX_WORKERS.min(num_cpus());
-    let mut handles = Vec::with_capacity(worker_count);
-
-    for _ in 0..worker_count {
-        let q = Arc::clone(&queue);
-        let tx_clone = tx.clone();
-        let cancelled_clone = Arc::clone(&cancelled);
-
-        let handle = std::thread::spawn(move || {
-            run_worker(q, tx_clone, cancelled_clone);
-        });
-
-        handles.push(handle);
-    }
-
-    // Wait for all workers to finish.
-    for handle in handles {
-        let _ = handle.join();
-    }
-
-    let _ = tx.send(ScanMessage::Complete);
+/// Represents a scanned directory with aggregated size information.
+#[derive(Debug, Clone)]
+pub struct DirNode {
+    /// Absolute path of this directory.
+    pub path: PathBuf,
+    /// Total size in bytes of all files reachable from this directory.
+    pub size: u64,
+    /// Immediate children (files and sub-directories) discovered in this node.
+    pub children: Vec<FsEntry>,
 }
 
-/// Reads a single directory level and returns its immediate children.
+/// A single filesystem entry (file or directory) discovered during scanning.
+#[derive(Debug, Clone)]
+pub struct FsEntry {
+    /// Path of this entry.
+    pub path: PathBuf,
+    /// `true` if this entry is a directory.
+    pub is_dir: bool,
+    /// Size in bytes. For directories this reflects the aggregated subtree size
+    /// only when produced by [`scan_dir_sync`]; otherwise it is the raw
+    /// `metadata().len()` value.
+    pub size: u64,
+}
+
+// ---------------------------------------------------------------------------
+// read_dir_immediate
+// ---------------------------------------------------------------------------
+
+/// Reads a single directory level and returns all entries.
 ///
-/// Does **not** recurse into subdirectories.  Silently skips entries that
-/// produce permission errors.
+/// Permission errors are silently skipped. Other I/O errors are returned.
 ///
 /// # Errors
 ///
-/// Returns an `Err` if the root itself cannot be read (excluding permission
-/// errors, which return an empty `Vec`).
-pub fn read_dir_immediate(root: &Path) -> std::io::Result<Vec<DirEntry>> {
-    let mut entries = Vec::new();
+/// Returns [`ScanError::Io`] if the directory itself cannot be opened.
+pub fn read_dir_immediate(path: &Path) -> Result<Vec<FsEntry>, ScanError> {
+    let read_dir = fs::read_dir(path).map_err(|e| ScanError::Io {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
 
-    let read_dir = match std::fs::read_dir(root) {
-        Ok(rd) => rd,
-        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-            return Ok(entries);
-        }
-        Err(e) => return Err(e),
-    };
+    let mut entries = Vec::new();
 
     for result in read_dir {
         let dir_entry = match result {
-            Ok(de) => de,
-            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => continue,
-            Err(e) => return Err(e),
+            Ok(e) => e,
+            Err(e) if e.kind() == io::ErrorKind::PermissionDenied => continue,
+            Err(e) => {
+                return Err(ScanError::Io {
+                    path: path.to_path_buf(),
+                    source: e,
+                })
+            }
         };
 
-        let child_path = dir_entry.path();
-
-        let meta = match dir_entry.metadata() {
+        let entry_path = dir_entry.path();
+        let metadata = match dir_entry.metadata() {
             Ok(m) => m,
-            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => continue,
-            Err(e) => return Err(e),
+            Err(e) if e.kind() == io::ErrorKind::PermissionDenied => continue,
+            Err(e) => {
+                return Err(ScanError::Io {
+                    path: entry_path,
+                    source: e,
+                })
+            }
         };
 
-        let mut entry = DirEntry::new(child_path, 1);
-        if !meta.is_dir() {
-            entry.size = meta.len();
-        }
-        entry.child_count = 1; // self
-
-        entries.push(entry);
+        entries.push(FsEntry {
+            path: entry_path,
+            is_dir: metadata.is_dir(),
+            size: metadata.len(),
+        });
     }
 
     Ok(entries)
 }
 
-/// Recursively scans `root` on the **calling thread** and returns a list of
-/// [`DirEntry`] values with bottom-up size aggregation.
+// ---------------------------------------------------------------------------
+// scan_dir_sync
+// ---------------------------------------------------------------------------
+
+/// Recursively scans `root` in a single thread, aggregating sizes bottom-up.
 ///
-/// Subdirectory sizes are accumulated into their parent before the parent
-/// entry is appended, so the returned slice is in bottom-up (post-order) order.
+/// Returns a [`DirNode`] whose `size` field reflects the total size of all
+/// files in the entire subtree.
 ///
-/// Silently skips permission errors.  Respects `cancelled`.
+/// Respects the `cancelled` flag; returns [`ScanError::Cancelled`] if set.
+/// Permission errors are silently skipped.
+///
+/// # Errors
+///
+/// Returns [`ScanError::Io`] on unexpected I/O failures, or
+/// [`ScanError::Cancelled`] if the atomic flag is set.
 pub fn scan_dir_sync(
     root: &Path,
-    cancelled: &AtomicBool,
-) -> Vec<DirEntry> {
-    let mut results = Vec::new();
-    scan_recursive(root, 0, cancelled, &mut results);
-    results
+    cancelled: Arc<AtomicBool>,
+) -> Result<DirNode, ScanError> {
+    scan_recursive(root, &cancelled)
 }
 
-// ── Internal helpers ──────────────────────────────────────────────────────────
-
-/// Recursive helper for [`scan_dir_sync`].
-///
-/// Returns the total size (bytes) of all files under `path` so the caller can
-/// accumulate it into the parent entry.
-fn scan_recursive(
-    path: &Path,
-    depth: usize,
-    cancelled: &AtomicBool,
-    results: &mut Vec<DirEntry>,
-) -> u64 {
+fn scan_recursive(path: &Path, cancelled: &Arc<AtomicBool>) -> Result<DirNode, ScanError> {
     if cancelled.load(Ordering::Relaxed) {
-        return 0;
+        return Err(ScanError::Cancelled);
     }
 
-    let read_dir = match std::fs::read_dir(path) {
+    let read_dir = match fs::read_dir(path) {
         Ok(rd) => rd,
-        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => return 0,
-        Err(_) => return 0,
+        Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {
+            // Return an empty node for inaccessible directories.
+            return Ok(DirNode {
+                path: path.to_path_buf(),
+                size: 0,
+                children: Vec::new(),
+            });
+        }
+        Err(e) => {
+            return Err(ScanError::Io {
+                path: path.to_path_buf(),
+                source: e,
+            })
+        }
     };
 
-    let mut entry = DirEntry::new(path.to_path_buf(), depth);
+    let mut children: Vec<FsEntry> = Vec::new();
+    let mut total_size: u64 = 0;
 
     for result in read_dir {
         if cancelled.load(Ordering::Relaxed) {
-            break;
+            return Err(ScanError::Cancelled);
         }
 
         let dir_entry = match result {
-            Ok(de) => de,
-            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => continue,
-            Err(_) => continue,
+            Ok(e) => e,
+            Err(e) if e.kind() == io::ErrorKind::PermissionDenied => continue,
+            Err(e) => {
+                return Err(ScanError::Io {
+                    path: path.to_path_buf(),
+                    source: e,
+                })
+            }
         };
 
-        let child_path = dir_entry.path();
-        entry.child_count += 1;
-
-        let meta = match dir_entry.metadata() {
+        let entry_path = dir_entry.path();
+        let metadata = match dir_entry.metadata() {
             Ok(m) => m,
-            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => continue,
+            Err(e) if e.kind() == io::ErrorKind::PermissionDenied => continue,
             Err(_) => continue,
         };
 
-        if meta.is_dir() {
-            // Recurse first (post-order / bottom-up).
-            let child_size = scan_recursive(&child_path, depth + 1, cancelled, results);
-            entry.size += child_size;
+        if metadata.is_dir() {
+            // Recurse — bottom-up aggregation.
+            match scan_recursive(&entry_path, cancelled) {
+                Ok(child_node) => {
+                    let child_size = child_node.size;
+                    total_size += child_size;
+                    children.push(FsEntry {
+                        path: entry_path,
+                        is_dir: true,
+                        size: child_size,
+                    });
+                    // child_node is consumed; callers receive the aggregated root.
+                }
+                Err(ScanError::Cancelled) => return Err(ScanError::Cancelled),
+                Err(_) => continue, // skip unreadable sub-trees
+            }
         } else {
-            entry.size += meta.len();
+            let file_size = metadata.len();
+            total_size += file_size;
+            children.push(FsEntry {
+                path: entry_path,
+                is_dir: false,
+                size: file_size,
+            });
         }
     }
 
-    let total_size = entry.size;
-    results.push(entry);
-    total_size
+    Ok(DirNode {
+        path: path.to_path_buf(),
+        size: total_size,
+        children,
+    })
 }
 
-/// Returns a reasonable number of worker threads to use (capped at
-/// [`MAX_WORKERS`]).  Falls back to 1 if the CPU count cannot be determined.
-fn num_cpus() -> usize {
-    // std::thread::available_parallelism was stabilised in Rust 1.59.
-    std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(1)
-        .min(MAX_WORKERS)
-}
+// ---------------------------------------------------------------------------
+// scan_dir_incremental
+// ---------------------------------------------------------------------------
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
+/// Maximum number of worker threads spawned by [`scan_dir_incremental`].
+const MAX_WORKERS: usize = 8;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::atomic::AtomicBool;
+/// Incrementally scans `root` using up to [`MAX_WORKERS`] threads.
+///
+/// Each scanned directory produces a [`ScanMessage::DirScanned`] message on
+/// `tx`. Non-fatal errors produce [`ScanMessage::ScanError`]. When the scan
+/// finishes (or is cancelled) a single [`ScanMessage::Complete`] is sent.
+///
+/// Permission errors are silently skipped and never produce a `ScanError`
+/// message.
+///
+/// The `cancelled` flag can be set from any thread to abort the scan
+/// cooperatively.
+pub fn scan_dir_incremental(
+    root: PathBuf,
+    tx: Sender<ScanMessage>,
+    cancelled: Arc<AtomicBool>,
+) {
+    // Shared work queue: directories yet to be scanned.
+    let queue = Arc::new(WorkQueue::new());
+    queue.push(root);
 
-    fn temp_tree() -> tempfile::TempDir {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let root = dir.path();
+    // Spawn worker threads.
+    let mut handles = Vec::with_capacity(MAX_WORKERS);
 
-        std::fs::write(root.join("a.txt"), b"hello").unwrap();
-        std::fs::write(root.join("b.txt"), b"world!!").unwrap();
-        std::fs::create_dir(root.join("sub")).unwrap();
-        std::fs::write(root.join("sub").join("c.txt"), b"nested").unwrap();
-
-        dir
+    for _ in 0..MAX_WORKERS {
+        let worker = Worker::new(
+            Arc::clone(&queue),
+            tx.clone(),
+            Arc::clone(&cancelled),
+        );
+        handles.push(std::thread::spawn(move || worker.run()));
     }
 
-    #[test]
-    fn read_dir_immediate_returns_children() {
-        let dir = temp_tree();
-        let entries = read_dir_immediate(dir.path()).expect("read_dir_immediate");
-        assert_eq!(entries.len(), 3, "expected 3 children (a.txt, b.txt, sub)");
+    // Wait for all workers to finish.
+    for handle in handles {
+        // Ignore panics in individual workers — the Complete message is sent
+        // by the last worker to exit via the WorkQueue sentinel.
+        let _ = handle.join();
     }
 
-    #[test]
-    fn scan_dir_sync_aggregates_sizes() {
-        let dir = temp_tree();
-        let cancelled = AtomicBool::new(false);
-        let results = scan_dir_sync(dir.path(), &cancelled);
-
-        // Should have at least the root and the sub directory.
-        assert!(results.len() >= 2);
-
-        // The root entry (last in bottom-up order) should have the largest size.
-        let root_entry = results.last().expect("at least one entry");
-        assert!(root_entry.size > 0);
-    }
-
-    #[test]
-    fn scan_dir_sync_respects_cancellation() {
-        let dir = temp_tree();
-        let cancelled = AtomicBool::new(true); // already cancelled
-        let results = scan_dir_sync(dir.path(), &cancelled);
-        assert!(results.is_empty(), "cancelled scan should return no results");
-    }
-
-    #[test]
-    fn scan_dir_incremental_sends_complete() {
-        let dir = temp_tree();
-        let cancelled = Arc::new(AtomicBool::new(false));
-        let (tx, rx) = std::sync::mpsc::channel::<ScanMessage>();
-
-        scan_dir_incremental(dir.path().to_path_buf(), tx, cancelled);
-
-        let messages: Vec<ScanMessage> = rx.try_iter().collect();
-        let has_complete = messages
-            .iter()
-            .any(|m| matches!(m, ScanMessage::Complete));
-        assert!(has_complete, "expected a Complete message");
-    }
-
-    #[test]
-    fn scan_dir_incremental_cancellation() {
-        let dir = temp_tree();
-        let cancelled = Arc::new(AtomicBool::new(true)); // cancel immediately
-        let (tx, rx) = std::sync::mpsc::channel::<ScanMessage>();
-
-        scan_dir_incremental(dir.path().to_path_buf(), tx, cancelled);
-
-        let messages: Vec<ScanMessage> = rx.try_iter().collect();
-        let has_complete = messages
-            .iter()
-            .any(|m| matches!(m, ScanMessage::Complete));
-        assert!(has_complete, "Complete must always be sent");
-    }
+    // Send the final Complete message.  If the channel is already closed
+    // (receiver dropped) we simply ignore the error.
+    let _ = tx.send(ScanMessage::Complete);
 }

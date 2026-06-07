@@ -2,7 +2,7 @@
 name = "scanner"
 version = "0.1.0"
 edition = "2021"
-description = "Multi-threaded filesystem scanner using std::thread"
+description = "Multi-threaded filesystem scanner with incremental and synchronous scanning modes"
 authors = []
 
 [[bin]]
@@ -22,3 +22,7 @@ opt-level = 3
 lto = true
 codegen-units = 1
 strip = true
+
+[profile.dev]
+opt-level = 0
+debug = true
