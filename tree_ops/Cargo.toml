@@ -3,20 +3,16 @@ name = "tree_ops"
 version = "0.1.0"
 edition = "2021"
 description = "Tree manipulation utilities for filesystem node hierarchies"
-authors = []
+license = "MIT"
 
 [lib]
 name = "tree_ops"
 path = "src/lib.rs"
 
+[[bin]]
+name = "tree_ops"
+path = "src/main.rs"
+
 [dependencies]
-# No external dependencies required for core tree operations
 
 [dev-dependencies]
-# No external dev dependencies required
-
-[profile.release]
-opt-level = 3
-lto = true
-codegen-units = 1
-strip = true
