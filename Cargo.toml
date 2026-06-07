@@ -1,3 +1,2 @@
-[workspace]
-members = ["crates/storage-wars"]
-resolver = "2"
+@@ workspace members section
++    "crates/utils",
