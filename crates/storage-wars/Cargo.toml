@@ -11,4 +11,7 @@ path = "src/main.rs"
 views = { path = "../views" }
 models = { path = "../models" }
 database = { path = "../database" }
+tree_ops = { path = "../tree_ops" }
+scanner = { path = "../scanner" }
+utils = { path = "../utils" }
 gpui = "0.1.0"

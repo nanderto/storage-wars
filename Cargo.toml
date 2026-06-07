@@ -1,11 +1,11 @@
 [workspace]
+resolver = "2"
 members = [
-    "crates/models",
+    "crates/storage-wars",
     "crates/tree_ops",
+    "crates/models",
     "crates/database",
     "crates/scanner",
     "crates/utils",
     "crates/views",
-    "crates/storage-wars",
 ]
-resolver = "2"
