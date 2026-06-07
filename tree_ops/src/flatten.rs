@@ -1,25 +1,25 @@
-//! Converts a nested [`FsNode`] tree to a flat `Vec<UiNode>` for UI rendering.
+//! Converts a nested `FsNode` tree into a flat `Vec<UiNode>` for UI rendering.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
 
 use crate::types::{FsNode, UiNode};
 
-/// Flattens a slice of root [`FsNode`]s into a `Vec<UiNode>` suitable for UI rendering.
+/// Flattens a nested `FsNode` tree into a `Vec<UiNode>` for UI rendering.
 ///
-/// Only nodes whose ancestors are all present in `expanded_paths` are included
-/// (root nodes are always included). The `scan_progress` field is computed as the
-/// ratio of a node's `size` to the maximum sibling `size` within the same parent,
-/// giving a value in `[0.0, 1.0]`.
+/// Only nodes whose parent paths are present in `expanded_paths` are included
+/// beyond the root level. The `scan_progress` field of each `UiNode` is set
+/// to the node's size divided by the maximum sibling size (or `1.0` if there
+/// is only one sibling or the maximum is zero).
 ///
 /// # Arguments
 ///
-/// * `roots` — The root nodes of the filesystem tree.
-/// * `expanded_paths` — Set of paths that are currently expanded in the UI.
+/// * `roots` - The root nodes of the `FsNode` hierarchy.
+/// * `expanded_paths` - The set of paths whose children should be rendered.
 ///
 /// # Returns
 ///
-/// A depth-first ordered `Vec<UiNode>` containing all visible nodes.
+/// A flat `Vec<UiNode>` in pre-order (depth-first) traversal order.
 ///
 /// # Examples
 ///

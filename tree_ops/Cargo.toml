@@ -2,7 +2,7 @@
 name = "tree_ops"
 version = "0.1.0"
 edition = "2021"
-description = "Tree manipulation utilities for filesystem node hierarchies"
+description = "Tree manipulation utilities for FsNode hierarchy operations"
 authors = []
 
 [[bin]]

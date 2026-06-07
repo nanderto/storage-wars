@@ -2,85 +2,76 @@
 
 use std::path::PathBuf;
 
-/// A flat database record representing a filesystem entry.
+/// A flat database record representing a filesystem node.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DbNode {
     /// Unique identifier for this node.
     pub id: u64,
     /// Identifier of the parent node; `None` for root nodes.
     pub parent_id: Option<u64>,
-    /// Display name of the filesystem entry.
-    pub name: String,
-    /// Absolute path to the filesystem entry.
+    /// Filesystem path of this node.
     pub path: PathBuf,
-    /// Size in bytes of this entry (file size or directory total).
+    /// Size in bytes of this node (file size or directory total).
     pub size: u64,
-    /// Number of direct children (for directories).
+    /// Number of child entries (relevant for directories).
     pub child_count: usize,
-    /// Whether this entry is a directory.
+    /// Whether this node represents a directory.
     pub is_dir: bool,
 }
 
-/// A node in the reconstructed filesystem tree hierarchy.
+/// A hierarchical filesystem node with nested children.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FsNode {
     /// Unique identifier for this node.
     pub id: u64,
-    /// Identifier of the parent node; `None` for root nodes.
-    pub parent_id: Option<u64>,
-    /// Display name of the filesystem entry.
-    pub name: String,
-    /// Absolute path to the filesystem entry.
+    /// Filesystem path of this node.
     pub path: PathBuf,
-    /// Size in bytes of this entry.
+    /// Size in bytes of this node.
     pub size: u64,
-    /// Total number of descendant file entries.
-    pub file_count: usize,
-    /// Whether this entry is a directory.
+    /// Total number of descendant entries.
+    pub child_count: usize,
+    /// Whether this node represents a directory.
     pub is_dir: bool,
-    /// Child nodes nested under this node.
+    /// Previous size in bytes from a baseline snapshot; `None` if not set.
+    pub prev_size: Option<u64>,
+    /// Nested child nodes (populated for directories).
     pub children: Vec<FsNode>,
 }
 
-/// A flattened node ready for UI rendering.
+impl FsNode {
+    /// Creates a new `FsNode` with no children and no baseline size.
+    pub fn new(id: u64, path: PathBuf, size: u64, child_count: usize, is_dir: bool) -> Self {
+        Self {
+            id,
+            path,
+            size,
+            child_count,
+            is_dir,
+            prev_size: None,
+            children: Vec::new(),
+        }
+    }
+}
+
+/// A flattened node suitable for UI rendering.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UiNode {
     /// Unique identifier for this node.
     pub id: u64,
-    /// Identifier of the parent node; `None` for root nodes.
-    pub parent_id: Option<u64>,
-    /// Display name of the filesystem entry.
-    pub name: String,
-    /// Absolute path to the filesystem entry.
+    /// Filesystem path of this node.
     pub path: PathBuf,
-    /// Size in bytes of this entry.
+    /// Size in bytes of this node.
     pub size: u64,
-    /// Size from a previous scan baseline, if available.
-    pub prev_size: Option<u64>,
-    /// Total number of descendant file entries.
-    pub file_count: usize,
-    /// Whether this entry is a directory.
+    /// Total number of descendant entries.
+    pub child_count: usize,
+    /// Whether this node represents a directory.
     pub is_dir: bool,
+    /// Previous size in bytes from a baseline snapshot; `None` if not set.
+    pub prev_size: Option<u64>,
     /// Depth level in the tree (root = 0).
     pub depth: usize,
     /// Whether this node is currently expanded in the UI.
     pub is_expanded: bool,
     /// Scan progress as a fraction [0.0, 1.0] relative to the largest sibling.
     pub scan_progress: f64,
-}
-
-impl FsNode {
-    /// Creates a new [`FsNode`] from a [`DbNode`] with no children.
-    pub fn from_db_node(db: DbNode) -> Self {
-        Self {
-            id: db.id,
-            parent_id: db.parent_id,
-            name: db.name,
-            path: db.path,
-            size: db.size,
-            file_count: db.child_count,
-            is_dir: db.is_dir,
-            children: Vec::new(),
-        }
-    }
 }

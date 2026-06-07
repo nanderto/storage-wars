@@ -1,8 +1,7 @@
-//! Entry point for the `tree_ops` binary.
+//! Entry point for the `tree_ops` binary target.
 //!
-//! This binary serves as a demonstration and integration harness for the
-//! tree_ops library. In production, the library crate is consumed directly
-//! by the desktop application.
+//! This binary is provided for quick smoke-testing and demonstration purposes.
+//! The primary API surface is the library crate (`lib.rs`).
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -13,125 +12,116 @@ use tree_ops::{
 };
 
 fn main() {
-    println!("tree_ops — filesystem tree manipulation utilities");
-    println!("=================================================");
+    println!("=== tree_ops smoke test ===\n");
 
-    // ── 1. Build a tree from flat DbNode records ──────────────────────────
+    // 1. Build a sample flat DbNode list.
     let db_nodes = vec![
         DbNode {
             id: 1,
             parent_id: None,
-            path: PathBuf::from("/home/user"),
+            path: PathBuf::from("/data"),
             size: 0,
+            child_count: 0,
             is_dir: true,
-            child_count: 2,
-            scan_progress: None,
         },
         DbNode {
             id: 2,
             parent_id: Some(1),
-            path: PathBuf::from("/home/user/documents"),
+            path: PathBuf::from("/data/docs"),
             size: 0,
+            child_count: 0,
             is_dir: true,
-            child_count: 1,
-            scan_progress: None,
         },
         DbNode {
             id: 3,
             parent_id: Some(2),
-            path: PathBuf::from("/home/user/documents/report.pdf"),
-            size: 2_048_000,
-            is_dir: false,
+            path: PathBuf::from("/data/docs/report.pdf"),
+            size: 1_024,
             child_count: 0,
-            scan_progress: None,
+            is_dir: false,
         },
         DbNode {
             id: 4,
             parent_id: Some(1),
-            path: PathBuf::from("/home/user/pictures"),
+            path: PathBuf::from("/data/images"),
             size: 0,
+            child_count: 0,
             is_dir: true,
-            child_count: 1,
-            scan_progress: None,
         },
         DbNode {
             id: 5,
             parent_id: Some(4),
-            path: PathBuf::from("/home/user/pictures/photo.jpg"),
-            size: 5_120_000,
-            is_dir: false,
+            path: PathBuf::from("/data/images/photo.jpg"),
+            size: 4_096,
             child_count: 0,
-            scan_progress: None,
+            is_dir: false,
+        },
+        DbNode {
+            id: 6,
+            parent_id: Some(4),
+            path: PathBuf::from("/data/images/thumb.jpg"),
+            size: 512,
+            child_count: 0,
+            is_dir: false,
         },
     ];
 
-    let mut roots = build_fs_tree(db_nodes);
-    println!("\n[1] build_fs_tree: {} root(s) constructed", roots.len());
+    // 2. Build the FsNode hierarchy.
+    let mut roots = build_fs_tree(&db_nodes);
+    println!("Built tree with {} root(s).", roots.len());
 
-    // ── 2. Recalculate sizes bottom-up ────────────────────────────────────
+    // 3. Recalculate sizes bottom-up.
     recalculate_sizes(&mut roots);
     println!(
-        "[2] recalculate_sizes: root size = {} bytes, file_count = {}",
-        roots[0].size, roots[0].file_count
+        "Root size after recalculation: {} bytes",
+        roots[0].size
     );
 
-    // ── 3. Build a baseline snapshot ─────────────────────────────────────
-    let baseline = build_baseline_map(&roots);
-    println!("[3] build_baseline_map: {} entries in baseline", baseline.len());
-
-    // ── 4. Simulate a new scan and merge baseline ─────────────────────────
-    let mut new_roots = roots.clone();
-    // Simulate a new file appearing and sizes changing.
-    let new_file = FsNode::new(
-        6,
-        PathBuf::from("/home/user/documents/notes.txt"),
-        4_096,
-        1,
+    // 4. Insert new children into /data/docs.
+    let new_child = FsNode::new(
+        7,
+        PathBuf::from("/data/docs/notes.txt"),
+        256,
+        0,
         false,
     );
-    insert_children(
-        &mut new_roots,
-        PathBuf::from("/home/user/documents").as_path(),
-        vec![
-            FsNode::new(
-                3,
-                PathBuf::from("/home/user/documents/report.pdf"),
-                2_048_000,
-                1,
-                false,
-            ),
-            new_file,
-        ],
-    );
-    recalculate_sizes(&mut new_roots);
-    merge_baseline(&mut new_roots, &baseline);
+    let inserted = insert_children(&mut roots, &PathBuf::from("/data/docs"), vec![new_child]);
+    println!("insert_children into /data/docs: {}", inserted);
+
+    // 5. Build a baseline map and merge it.
+    let baseline_nodes: Vec<FsNode> = db_nodes
+        .iter()
+        .map(|db| FsNode::new(db.id, db.path.clone(), db.size.saturating_sub(100), 0, db.is_dir))
+        .collect();
+    let baseline = build_baseline_map(&baseline_nodes);
+    merge_baseline(&mut roots, &baseline);
     println!(
-        "[4] merge_baseline: root prev_size = {:?}",
-        new_roots[0].prev_size
+        "prev_size of /data/images/photo.jpg: {:?}",
+        roots[0]
+            .children
+            .iter()
+            .find(|n| n.path == PathBuf::from("/data/images"))
+            .and_then(|n| n.children.iter().find(|c| c.path == PathBuf::from("/data/images/photo.jpg")))
+            .and_then(|n| n.prev_size)
     );
 
-    // ── 5. Flatten for UI rendering ───────────────────────────────────────
+    // 6. Flatten the tree for UI rendering.
     let mut expanded = HashSet::new();
-    expanded.insert(PathBuf::from("/home/user"));
-    expanded.insert(PathBuf::from("/home/user/documents"));
-
-    let ui_nodes = flatten_tree(&new_roots, &expanded);
-    println!("[5] flatten_tree: {} UI nodes visible", ui_nodes.len());
-    for ui_node in &ui_nodes {
-        let indent = "  ".repeat(ui_node.depth);
-        let fraction = ui_node
-            .size_fraction
-            .map(|f| format!("{:.1}%", f * 100.0))
-            .unwrap_or_else(|| "n/a".to_string());
+    expanded.insert(PathBuf::from("/data"));
+    expanded.insert(PathBuf::from("/data/images"));
+    let ui_nodes = flatten_tree(&roots, &expanded);
+    println!("\nFlattened UI nodes ({} visible):", ui_nodes.len());
+    for node in &ui_nodes {
+        let indent = "  ".repeat(node.depth);
         println!(
-            "{}[{}] {} — {} bytes ({})",
+            "{}[{}] {} — size={} progress={:.2}",
             indent,
-            if ui_node.is_dir { "DIR" } else { "FILE" },
-            ui_node.path.display(),
-            ui_node.size,
-            fraction,
+            if node.is_dir { "D" } else { "F" },
+            node.path.display(),
+            node.size,
+            node.scan_progress,
         );
     }
 
-    println!("\nAll operations completed successfully.");
+    println!("\n=== smoke test complete ===");
 }

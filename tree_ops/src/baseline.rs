@@ -1,25 +1,23 @@
-//! Baseline map utilities for tracking size changes between scans.
+//! Baseline snapshot utilities: building a lookup map and merging into the tree.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use crate::models::FsNode;
 
-/// A lookup map from filesystem path to the previously recorded size in bytes.
-pub type BaselineMap = HashMap<PathBuf, u64>;
+use crate::types::FsNode;
 
-/// Builds a [`BaselineMap`] from the current state of the tree.
+/// Builds a `PathBuf → u64` lookup map from a slice of `FsNode` records.
 ///
-/// Walks the entire tree and records each node's `path → size` pair.
-/// This snapshot can later be passed to [`merge_baseline`] to populate
-/// `prev_size` on a freshly scanned tree.
+/// The map contains one entry per node, mapping its path to its size.
+/// This is typically called on a previous snapshot of the tree to create
+/// a baseline for comparison.
 ///
 /// # Arguments
 ///
-/// * `roots` — Root nodes of the filesystem tree to snapshot.
+/// * `nodes` - A flat slice of `FsNode` records (need not be a tree).
 ///
 /// # Returns
 ///
-/// A `HashMap<PathBuf, u64>` mapping each node's path to its current size.
+/// A `HashMap<PathBuf, u64>` mapping each node's path to its size.
 ///
 /// # Examples
 ///
