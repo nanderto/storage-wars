@@ -3,11 +3,10 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-/// Metadata describing a single disk-scan session.
+/// Metadata describing a single scan session.
 ///
-/// Each time the application scans a drive or directory, a [`ScanMeta`] record is
-/// created to capture when the scan occurred, which path was scanned, and summary
-/// statistics about the results.
+/// Each scan session targets a specific root path and records timing
+/// information along with aggregate statistics.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ScanMeta {
     /// Unique identifier for this scan session.
@@ -16,10 +15,10 @@ pub struct ScanMeta {
     /// The root path that was scanned.
     pub root_path: String,
 
-    /// When the scan was started.
+    /// Timestamp when the scan was started.
     pub started_at: DateTime<Utc>,
 
-    /// When the scan completed, or `None` if it is still in progress.
+    /// Timestamp when the scan completed. `None` if the scan is still in progress.
     pub completed_at: Option<DateTime<Utc>>,
 
     /// Total number of files discovered during the scan.
@@ -34,12 +33,12 @@ pub struct ScanMeta {
     /// Whether the scan completed successfully.
     pub success: bool,
 
-    /// An optional error message if the scan did not complete successfully.
+    /// Optional error message if the scan encountered a fatal error.
     pub error_message: Option<String>,
 }
 
 impl ScanMeta {
-    /// Creates a new [`ScanMeta`] for a scan that is starting now.
+    /// Creates a new `ScanMeta` for a scan that has just started.
     pub fn new(id: i64, root_path: impl Into<String>) -> Self {
         Self {
             id,
@@ -67,10 +66,14 @@ impl ScanMeta {
         self.error_message = Some(error.into());
     }
 
-    /// Returns the duration of the scan in seconds, or `None` if not yet complete.
-    pub fn duration_secs(&self) -> Option<i64> {
-        self.completed_at
-            .map(|end| (end - self.started_at).num_seconds())
+    /// Returns the duration of the scan in seconds, if it has completed.
+    pub fn duration_secs(&self) -> Option<f64> {
+        self.completed_at.map(|end| {
+            (end - self.started_at)
+                .num_milliseconds()
+                .max(0) as f64
+                / 1000.0
+        })
     }
 
     /// Returns `true` if the scan is still in progress.
@@ -84,38 +87,36 @@ mod tests {
     use super::*;
 
     #[test]
-    fn new_scan_is_in_progress() {
-        let meta = ScanMeta::new(1, "/home");
+    fn test_new_scan_meta() {
+        let meta = ScanMeta::new(1, "/home/user");
+        assert_eq!(meta.id, 1);
+        assert_eq!(meta.root_path, "/home/user");
         assert!(meta.is_in_progress());
         assert!(!meta.success);
-        assert!(meta.completed_at.is_none());
+        assert!(meta.error_message.is_none());
     }
 
     #[test]
-    fn mark_complete_sets_success() {
-        let mut meta = ScanMeta::new(1, "/home");
+    fn test_mark_complete() {
+        let mut meta = ScanMeta::new(1, "/home/user");
         meta.mark_complete();
-        assert!(meta.success);
         assert!(!meta.is_in_progress());
+        assert!(meta.success);
         assert!(meta.completed_at.is_some());
     }
 
     #[test]
-    fn mark_failed_sets_error() {
-        let mut meta = ScanMeta::new(1, "/home");
-        meta.mark_failed("permission denied");
-        assert!(!meta.success);
-        assert_eq!(meta.error_message.as_deref(), Some("permission denied"));
+    fn test_mark_failed() {
+        let mut meta = ScanMeta::new(1, "/home/user");
+        meta.mark_failed("Permission denied");
         assert!(!meta.is_in_progress());
+        assert!(!meta.success);
+        assert_eq!(meta.error_message.as_deref(), Some("Permission denied"));
     }
 
     #[test]
-    fn serialization_round_trip() {
-        let mut meta = ScanMeta::new(7, "/mnt/data");
-        meta.total_files = 1000;
-        meta.total_size = 1_000_000;
-        let json = serde_json::to_string(&meta).unwrap();
-        let restored: ScanMeta = serde_json::from_str(&json).unwrap();
-        assert_eq!(meta, restored);
+    fn test_duration_none_when_in_progress() {
+        let meta = ScanMeta::new(1, "/");
+        assert!(meta.duration_secs().is_none());
     }
 }

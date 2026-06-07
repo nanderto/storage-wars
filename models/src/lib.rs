@@ -1,13 +1,8 @@
-//! Core data model types for the disk usage analyzer desktop application.
+//! Core data model types for the disk analyzer desktop application.
 //!
-//! This crate provides:
-//! - [`FsNode`]: Filesystem tree node with name, path, size, counts, and timestamps
-//! - [`DbNode`]: Flat database representation with parent references
-//! - [`ScanMeta`]: Scan session metadata
-//! - [`DriveInfo`]: Drive name, volume label, and space information
-//! - [`UiNode`]: FsNode wrapper with UI state (depth, expanded, scan progress)
-//! - [`SizeChange`]: Delta classification with hex color codes
-//! - [`ScanMessage`]: Enum for scan event messages
+//! This crate provides the fundamental data structures used across the
+//! application, including filesystem tree nodes, database representations,
+//! scan metadata, drive information, UI state wrappers, and messaging types.
 
 pub mod db_node;
 pub mod drive_info;
