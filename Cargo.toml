@@ -1,4 +1,2 @@
---- a/Cargo.toml
-+++ b/Cargo.toml
-@@ workspace.members
-+"crates/views",
+@@ workspace members list
++    "crates/views",
