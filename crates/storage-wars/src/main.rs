@@ -1,3 +1,3 @@
 fn main() {
-    println!("Storage Wars starting...");
+    println!("Storage Wars");
 }
