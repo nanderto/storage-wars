@@ -1,0 +1,1 @@
+// Placeholder – application entry point will be implemented in a later task.
