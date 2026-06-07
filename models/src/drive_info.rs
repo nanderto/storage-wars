@@ -3,25 +3,23 @@
 use serde::{Deserialize, Serialize};
 
 /// Information about a storage drive or volume.
-///
-/// Provides the drive name, optional volume label, and space statistics.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DriveInfo {
-    /// System name of the drive (e.g. `"C:"` on Windows, `"/dev/sda1"` on Linux).
+    /// System drive name (e.g. `"C:"` on Windows, `"/dev/sda1"` on Linux).
     pub name: String,
 
-    /// Human-readable volume label, if one is assigned.
+    /// Human-readable volume label assigned to the drive, if any.
     pub volume_label: Option<String>,
 
     /// Total capacity of the drive in bytes.
     pub total_space: u64,
 
-    /// Available (free) space on the drive in bytes.
+    /// Currently available (free) space on the drive in bytes.
     pub available_space: u64,
 }
 
 impl DriveInfo {
-    /// Creates a new `DriveInfo` instance.
+    /// Creates a new [`DriveInfo`] with the given name and space values.
     pub fn new(
         name: impl Into<String>,
         volume_label: Option<String>,
@@ -36,24 +34,19 @@ impl DriveInfo {
         }
     }
 
-    /// Returns the used space in bytes.
+    /// Returns the used space in bytes (`total_space - available_space`).
+    /// Saturates at zero to guard against inconsistent OS-reported values.
     pub fn used_space(&self) -> u64 {
         self.total_space.saturating_sub(self.available_space)
     }
 
-    /// Returns the percentage of space used as a value between `0.0` and `100.0`.
-    ///
-    /// Returns `0.0` if `total_space` is zero to avoid division by zero.
+    /// Returns the percentage of space used as a value in `[0.0, 100.0]`.
+    /// Returns `0.0` when `total_space` is zero.
     pub fn used_percent(&self) -> f64 {
         if self.total_space == 0 {
             return 0.0;
         }
         (self.used_space() as f64 / self.total_space as f64) * 100.0
-    }
-
-    /// Returns the display label: the volume label if present, otherwise the drive name.
-    pub fn display_label(&self) -> &str {
-        self.volume_label.as_deref().unwrap_or(&self.name)
     }
 }
 
@@ -62,32 +55,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_used_space() {
-        let drive = DriveInfo::new("C:", Some("System".to_string()), 1_000_000, 400_000);
-        assert_eq!(drive.used_space(), 600_000);
+    fn used_space_is_correct() {
+        let drive = DriveInfo::new("C:", Some("System".to_string()), 1_000, 400);
+        assert_eq!(drive.used_space(), 600);
     }
 
     #[test]
-    fn test_used_percent() {
-        let drive = DriveInfo::new("C:", None, 1_000_000, 250_000);
+    fn used_percent_is_correct() {
+        let drive = DriveInfo::new("C:", None, 1_000, 250);
         assert!((drive.used_percent() - 75.0).abs() < f64::EPSILON);
     }
 
     #[test]
-    fn test_used_percent_zero_total() {
+    fn used_percent_zero_when_total_is_zero() {
         let drive = DriveInfo::new("C:", None, 0, 0);
         assert_eq!(drive.used_percent(), 0.0);
-    }
-
-    #[test]
-    fn test_display_label_with_volume_label() {
-        let drive = DriveInfo::new("C:", Some("My Drive".to_string()), 1000, 500);
-        assert_eq!(drive.display_label(), "My Drive");
-    }
-
-    #[test]
-    fn test_display_label_without_volume_label() {
-        let drive = DriveInfo::new("/dev/sda1", None, 1000, 500);
-        assert_eq!(drive.display_label(), "/dev/sda1");
     }
 }

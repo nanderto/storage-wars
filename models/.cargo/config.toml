@@ -1,7 +1,4 @@
 [build]
-# Emit compiler warnings as errors in CI; remove this line for local development
+# Emit all compiler warnings as errors in CI-like environments.
+# Remove or adjust this flag for local development if desired.
 # rustflags = ["-D", "warnings"]
-
-[profile.dev]
-# Faster incremental builds during development
-incremental = true

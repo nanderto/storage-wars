@@ -2,7 +2,8 @@
 //!
 //! This crate provides the fundamental data structures used across the
 //! application, including filesystem tree nodes, database representations,
-//! scan metadata, drive information, UI state wrappers, and messaging types.
+//! scan metadata, drive information, UI state wrappers, size change
+//! classifications, and scan messaging.
 
 pub mod db_node;
 pub mod drive_info;
@@ -17,5 +18,5 @@ pub use drive_info::DriveInfo;
 pub use fs_node::FsNode;
 pub use scan_message::ScanMessage;
 pub use scan_meta::ScanMeta;
-pub use size_change::{SizeChange, SizeChangeTrend};
+pub use size_change::SizeChange;
 pub use ui_node::UiNode;

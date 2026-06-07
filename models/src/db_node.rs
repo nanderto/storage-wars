@@ -1,18 +1,16 @@
 //! Flat database representation of a filesystem node.
 
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-/// A flat representation of a filesystem node suitable for storage in a relational database.
-///
-/// Unlike [`crate::FsNode`], which forms a tree via nested children, `DbNode` uses
-/// a `parent_id` foreign key to express the parent–child relationship.
+/// A flat representation of a filesystem node suitable for storage in a
+/// relational database. Uses a `parent_id` foreign key to reconstruct the
+/// tree hierarchy.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DbNode {
     /// Unique identifier for this node within the database.
     pub id: i64,
 
-    /// Identifier of the parent node. `None` for root nodes.
+    /// Identifier of the parent node; `None` for root nodes.
     pub parent_id: Option<i64>,
 
     /// Identifier of the scan session this node belongs to.
@@ -27,31 +25,31 @@ pub struct DbNode {
     /// Size in bytes.
     pub size: u64,
 
-    /// Previous size in bytes from the prior scan session, if available.
+    /// Size in bytes from the previous scan session, if available.
     pub prev_size: Option<u64>,
 
-    /// Number of files under this node (recursive).
+    /// Number of files under this node.
     pub file_count: u64,
 
-    /// Number of folders under this node (recursive).
+    /// Number of sub-directories under this node.
     pub folder_count: u64,
 
-    /// Last modified timestamp.
-    pub modified: Option<DateTime<Utc>>,
+    /// Last modification timestamp as a Unix epoch second.
+    pub modified: Option<i64>,
 
     /// Whether this node represents a directory.
     pub is_dir: bool,
 }
 
 impl DbNode {
-    /// Creates a new `DbNode` with the given identifiers and basic metadata.
+    /// Creates a new [`DbNode`] with the given identifiers, name, and path.
+    /// All numeric fields default to zero and optional fields to `None`.
     pub fn new(
         id: i64,
         parent_id: Option<i64>,
         scan_id: i64,
         name: impl Into<String>,
         path: impl Into<String>,
-        size: u64,
         is_dir: bool,
     ) -> Self {
         Self {
@@ -60,18 +58,13 @@ impl DbNode {
             scan_id,
             name: name.into(),
             path: path.into(),
-            size,
+            size: 0,
             prev_size: None,
             file_count: 0,
             folder_count: 0,
             modified: None,
             is_dir,
         }
-    }
-
-    /// Returns `true` if this node is a root node (has no parent).
-    pub fn is_root(&self) -> bool {
-        self.parent_id.is_none()
     }
 }
 
@@ -80,26 +73,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_new_db_node() {
-        let node = DbNode::new(1, None, 10, "root", "/", 0, true);
+    fn new_db_node_defaults_are_zero() {
+        let node = DbNode::new(1, None, 42, "root", "/", true);
         assert_eq!(node.id, 1);
-        assert!(node.parent_id.is_none());
-        assert_eq!(node.scan_id, 10);
+        assert_eq!(node.parent_id, None);
+        assert_eq!(node.scan_id, 42);
+        assert_eq!(node.size, 0);
         assert!(node.is_dir);
-        assert!(node.is_root());
-    }
-
-    #[test]
-    fn test_non_root_node() {
-        let node = DbNode::new(2, Some(1), 10, "docs", "/docs", 4096, true);
-        assert!(!node.is_root());
-        assert_eq!(node.parent_id, Some(1));
-    }
-
-    #[test]
-    fn test_file_node() {
-        let node = DbNode::new(3, Some(2), 10, "readme.md", "/docs/readme.md", 512, false);
-        assert!(!node.is_dir);
-        assert_eq!(node.size, 512);
     }
 }
