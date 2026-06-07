@@ -1,15 +1,27 @@
 [build]
-# Use the faster linker on macOS when available.
-# Falls back gracefully on other platforms.
-
-[target.x86_64-apple-darwin]
-rustflags = ["-C", "link-arg=-fuse-ld=lld"]
-
-[target.aarch64-apple-darwin]
-rustflags = []
+# Use the faster `lld` linker on Linux when available.
+# On macOS the system linker is used by default.
 
 [target.x86_64-unknown-linux-gnu]
-rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]
 
-[env]
-RUST_BACKTRACE = { value = "1", force = false }
+[target.aarch64-unknown-linux-gnu]
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "link-arg=-Wl,-rpath,@executable_path/../Frameworks"]
+
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "link-arg=-Wl,-rpath,@executable_path/../Frameworks"]
+
+[profile.dev]
+opt-level = 1          # Faster incremental builds with minimal optimisation.
+debug = true
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

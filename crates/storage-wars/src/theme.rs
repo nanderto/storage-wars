@@ -1,44 +1,64 @@
-use gpui::{Hsla, Rgba};
+//! Dark theme colour palette for Storage Wars.
+//!
+//! All colours are defined as [`gpui::Rgba`] constants so they can be used
+//! directly in GPUI style methods (`.bg(theme::BACKGROUND)`, etc.).
 
-/// Dark theme colour palette for Storage Wars.
-#[derive(Debug, Clone)]
-pub struct StorageWarsTheme {
-    /// Main window background.
-    pub background: Hsla,
-    /// Primary text / icon colour.
-    pub foreground: Hsla,
-    /// Secondary / muted text.
-    pub muted: Hsla,
-    /// Accent / highlight colour.
-    pub accent: Hsla,
-    /// Surface colour for cards and panels.
-    pub surface: Hsla,
-    /// Border colour.
-    pub border: Hsla,
-    /// Title-bar background.
-    pub title_bar_background: Hsla,
-}
+use gpui::{rgb, Rgba};
 
-impl StorageWarsTheme {
-    /// Construct the canonical dark theme.
-    pub fn dark() -> Self {
-        Self {
-            background: rgba(0x0d0d0dff),
-            foreground: rgba(0xe8e8e8ff),
-            muted: rgba(0x888888ff),
-            accent: rgba(0x4a9effff),
-            surface: rgba(0x1a1a1aff),
-            border: rgba(0x2a2a2aff),
-            title_bar_background: rgba(0x111111ff),
-        }
-    }
-}
+// ── Backgrounds ───────────────────────────────────────────────────────────────
 
-/// Convert a packed `0xRRGGBBAA` value into an [`Hsla`].
-fn rgba(packed: u32) -> Hsla {
-    let r = ((packed >> 24) & 0xff) as f32 / 255.0;
-    let g = ((packed >> 16) & 0xff) as f32 / 255.0;
-    let b = ((packed >> 8) & 0xff) as f32 / 255.0;
-    let a = (packed & 0xff) as f32 / 255.0;
-    Rgba { r, g, b, a }.into()
-}
+/// Primary application background — deep dark slate.
+pub const BACKGROUND: Rgba = rgb(0x0f1117);
+
+/// Secondary / surface background (panels, sidebars).
+pub const SURFACE: Rgba = rgb(0x1a1d27);
+
+/// Elevated surface (cards, modals, dropdowns).
+pub const ELEVATED: Rgba = rgb(0x22263a);
+
+// ── Borders ───────────────────────────────────────────────────────────────────
+
+/// Default border / divider colour.
+pub const BORDER: Rgba = rgb(0x2e3347);
+
+/// Subtle border (used for inner separators).
+pub const BORDER_SUBTLE: Rgba = rgb(0x1e2235);
+
+// ── Text ──────────────────────────────────────────────────────────────────────
+
+/// Primary text — near white.
+pub const TEXT_PRIMARY: Rgba = rgb(0xe8eaf0);
+
+/// Secondary / muted text.
+pub const TEXT_SECONDARY: Rgba = rgb(0x8b91a8);
+
+/// Disabled / placeholder text.
+pub const TEXT_DISABLED: Rgba = rgb(0x4a5068);
+
+// ── Accent (auction amber) ────────────────────────────────────────────────────
+
+/// Brand accent — auction amber.
+pub const ACCENT: Rgba = rgb(0xf5a623);
+
+/// Accent hover state.
+pub const ACCENT_HOVER: Rgba = rgb(0xf7b84b);
+
+/// Accent pressed / active state.
+pub const ACCENT_ACTIVE: Rgba = rgb(0xe09415);
+
+/// Accent foreground text (used on accent-coloured backgrounds).
+pub const ACCENT_FOREGROUND: Rgba = rgb(0x0f1117);
+
+// ── Semantic colours ──────────────────────────────────────────────────────────
+
+/// Success / positive indicator (green).
+pub const SUCCESS: Rgba = rgb(0x4caf7d);
+
+/// Warning indicator (amber — same hue as accent).
+pub const WARNING: Rgba = rgb(0xf5a623);
+
+/// Error / destructive indicator (red).
+pub const ERROR: Rgba = rgb(0xef5350);
+
+/// Informational indicator (blue).
+pub const INFO: Rgba = rgb(0x42a5f5);

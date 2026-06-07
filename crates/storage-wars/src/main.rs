@@ -1,56 +1,56 @@
-mod theme;
-mod title_bar;
+//! Storage Wars — entry point.
+//!
+//! Initialises the GPUI application, opens a 1280×800 centered window with a
+//! dark theme and a custom transparent title bar, then hands control to the
+//! GPUI event loop.
 
-use anyhow::Result;
 use gpui::{
-    actions, div, px, size, App, AppContext, Application, Bounds, Context, Entity, IntoElement,
-    ParentElement, Point, Render, SharedString, Styled, TitlebarOptions, ViewContext,
-    VisualContext, WindowBounds, WindowKind, WindowOptions,
+    actions, div, px, size, App, AppContext, Bounds, Context, Element, IntoElement,
+    KeyBinding, ParentElement, Point, Render, Styled, TitlebarOptions, ViewContext,
+    VisualContext, WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions,
 };
-use theme::StorageWarsTheme;
-use title_bar::TitleBar;
+
+mod theme;
+
+// ── Application-level actions ────────────────────────────────────────────────
 
 actions!(storage_wars, [Quit]);
 
-// ── Root application view ─────────────────────────────────────────────────────
+// ── Root view ────────────────────────────────────────────────────────────────
 
-struct StorageWarsApp {
-    title_bar: Entity<TitleBar>,
-    theme: StorageWarsTheme,
-}
-
-impl StorageWarsApp {
-    fn new(cx: &mut ViewContext<Self>) -> Self {
-        let theme = StorageWarsTheme::dark();
-        let title_bar = cx.new(|_cx| TitleBar::new("Storage Wars"));
-        Self { title_bar, theme }
-    }
-}
+/// The top-level GPUI view for the Storage Wars application.
+struct StorageWarsApp;
 
 impl Render for StorageWarsApp {
     fn render(&mut self, _cx: &mut ViewContext<Self>) -> impl IntoElement {
-        let theme = self.theme.clone();
-
         div()
             .flex()
             .flex_col()
             .size_full()
-            .bg(theme.background)
-            .text_color(theme.foreground)
-            // Custom title bar
-            .child(self.title_bar.clone())
-            // Main content area
+            .bg(theme::BACKGROUND)
+            .text_color(theme::TEXT_PRIMARY)
+            // ── Title bar spacer (transparent title bar eats ~28 px on macOS) ──
+            .child(div().h(px(28.0)))
+            // ── Main content area ─────────────────────────────────────────────
             .child(
                 div()
                     .flex()
+                    .flex_col()
                     .flex_1()
                     .items_center()
                     .justify_center()
+                    .gap(px(8.0))
                     .child(
                         div()
                             .text_xl()
-                            .text_color(theme.foreground)
-                            .child(SharedString::from("Storage Wars")),
+                            .font_weight(gpui::FontWeight::BOLD)
+                            .text_color(theme::ACCENT)
+                            .child("Storage Wars"),
+                    )
+                    .child(
+                        div()
+                            .text_color(theme::TEXT_SECONDARY)
+                            .child("Auction unit storage management"),
                     ),
             )
     }
@@ -58,53 +58,52 @@ impl Render for StorageWarsApp {
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
-fn main() -> Result<()> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+fn main() {
+    // Initialise logging from the `RUST_LOG` environment variable.
+    env_logger::init();
 
-    log::info!("Starting Storage Wars desktop application");
-
-    Application::new().run(|cx: &mut AppContext| {
-        // Global quit action bound to Cmd-Q / Ctrl-Q.
+    App::new().run(|cx: &mut AppContext| {
+        // Register global quit action.
         cx.on_action(|_: &Quit, cx| cx.quit());
-        cx.bind_keys([gpui::KeyBinding::new("cmd-q", Quit, None)]);
 
-        let window_options = build_window_options();
+        // Bind ⌘Q (macOS) / Ctrl+Q (Linux / Windows) to Quit.
+        cx.bind_keys([
+            KeyBinding::new("cmd-q", Quit, None),
+            KeyBinding::new("ctrl-q", Quit, None),
+        ]);
 
-        cx.open_window(window_options, |cx| cx.new(StorageWarsApp::new))
-            .expect("Failed to open the Storage Wars window");
+        // Open the main application window.
+        let window_options = build_window_options(cx);
+        cx.open_window(window_options, |cx| {
+            cx.new_view(|_cx| StorageWarsApp)
+        })
+        .expect("Failed to open the Storage Wars main window");
     });
-
-    Ok(())
 }
 
-/// Construct [`WindowOptions`] for a 1280 × 800 centred window with a
-/// transparent, custom title bar.
-fn build_window_options() -> WindowOptions {
+/// Constructs [`WindowOptions`] for the main 1280×800 centered window.
+fn build_window_options(cx: &AppContext) -> WindowOptions {
     WindowOptions {
-        window_bounds: Some(WindowBounds::Windowed(Bounds {
-            origin: Point {
-                x: px(0.0),
-                y: px(0.0),
-            },
-            size: size(px(1280.0), px(800.0)),
-        })),
+        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
+            None,
+            size(px(1280.0), px(800.0)),
+            cx,
+        ))),
         titlebar: Some(TitlebarOptions {
-            title: Some(SharedString::from("Storage Wars")),
+            title: Some("Storage Wars".into()),
             appears_transparent: true,
             traffic_light_position: Some(Point {
-                x: px(12.0),
-                y: px(12.0),
+                x: px(9.0),
+                y: px(9.0),
             }),
         }),
-        center: true,
-        focus: true,
-        show: true,
+        window_min_size: Some(size(px(800.0), px(600.0))),
         kind: WindowKind::Normal,
         is_movable: true,
         display_id: None,
-        window_background: gpui::WindowBackgroundAppearance::Opaque,
+        window_background: WindowBackgroundAppearance::Blurred,
+        focus: true,
+        show: true,
         app_id: Some("storage-wars".to_string()),
-        window_min_size: Some(size(px(800.0), px(600.0))),
-        window_decorations: None,
     }
 }

@@ -1,2 +1,3 @@
-# Clippy configuration for Storage Wars.
-cognitive-complexity-threshold = 30
+# Clippy configuration for storage-wars.
+cognitive-complexity-threshold = 25
+too-many-arguments-threshold = 8
