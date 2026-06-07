@@ -1,3 +1,5 @@
+// Storage Wars — desktop application entry point.
+
 fn main() {
-    println!("Storage Wars");
+    println!("Storage Wars starting...");
 }

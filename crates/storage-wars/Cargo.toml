@@ -8,10 +8,7 @@ name = "storage-wars"
 path = "src/main.rs"
 
 [dependencies]
-views = { path = "../views" }
 models = { path = "../models" }
 database = { path = "../database" }
-tree_ops = { path = "../tree_ops" }
-scanner = { path = "../scanner" }
-utils = { path = "../utils" }
+views = { path = "../views" }
 gpui = "0.1"
