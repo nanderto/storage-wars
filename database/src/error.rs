@@ -1,27 +1,17 @@
-//! Error types for the database component.
-
 use thiserror::Error;
 
-/// All errors that can be produced by the database component.
+/// All errors that can be produced by the database layer.
 #[derive(Debug, Error)]
 pub enum DbError {
+    /// Wraps any rusqlite error.
     #[error("SQLite error: {0}")]
     Sqlite(#[from] rusqlite::Error),
 
-    #[error("Environment variable not found: {0}")]
-    EnvVar(#[from] std::env::VarError),
+    /// Raised when the APPDATA environment variable is not set or cannot be resolved.
+    #[error("Could not determine application data directory: {0}")]
+    AppDataDir(String),
 
-    #[error("I/O error: {0}")]
-    Io(#[from] std::io::Error),
-
-    #[error("Database path is invalid: {0}")]
-    InvalidPath(String),
-
-    #[error("Scan not found: id={0}")]
-    ScanNotFound(i64),
-
-    #[error("Migration failed: {0}")]
-    MigrationFailed(String),
+    /// Raised when a required record is not found.
+    #[error("Record not found: {0}")]
+    NotFound(String),
 }
-
-pub type DbResult<T> = Result<T, DbError>;
