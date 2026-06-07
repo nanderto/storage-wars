@@ -1,0 +1,9 @@
+[package]
+name = "views"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+gpui.workspace = true
+models = { path = "../models" }
+tree_ops = { path = "../tree_ops" }
