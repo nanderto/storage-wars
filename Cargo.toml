@@ -1,6 +1,26 @@
-[workspace]
-members = ["crates/storage-wars"]
-resolver = "2"
+[package]
+name = "database"
+version = "0.1.0"
+edition = "2021"
 
-[workspace.dependencies]
-gpui = { git = "https://github.com/zed-industries/zed", rev = "main" }
+[[bin]]
+name = "database"
+path = "src/main.rs"
+
+[lib]
+name = "database"
+path = "src/lib.rs"
+
+[dependencies]
+rusqlite = { version = "0.31", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "1"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
