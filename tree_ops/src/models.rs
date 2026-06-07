@@ -1,88 +1,91 @@
-//! Data models used throughout the tree_ops crate.
+//! Data models shared across tree_ops operations.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::path::PathBuf;
 
-/// A flat node record as stored in the database.
+/// A flat database record representing a single filesystem node.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DbNode {
     /// Unique identifier for this node.
     pub id: u64,
     /// Identifier of the parent node; `None` for root nodes.
     pub parent_id: Option<u64>,
-    /// Filesystem path of this node.
+    /// Display name of the node (file or directory name).
+    pub name: String,
+    /// Absolute path of the node on the filesystem.
     pub path: PathBuf,
     /// Size in bytes of this node (file size, or 0 for directories before aggregation).
     pub size: u64,
+    /// Number of direct or total child items (0 for files).
+    pub item_count: u64,
     /// Whether this node represents a directory.
     pub is_dir: bool,
-    /// Number of direct children (files/directories) under this node.
-    pub child_count: usize,
-    /// Scan progress as a value in `[0.0, 1.0]`; `None` if scanning is complete.
-    pub scan_progress: Option<f64>,
 }
 
-/// A node in the reconstructed filesystem tree hierarchy.
+/// A hierarchical filesystem node, potentially containing children.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FsNode {
     /// Unique identifier for this node.
     pub id: u64,
-    /// Filesystem path of this node.
+    /// Identifier of the parent node; `None` for root nodes.
+    pub parent_id: Option<u64>,
+    /// Display name of the node.
+    pub name: String,
+    /// Absolute path of the node on the filesystem.
     pub path: PathBuf,
-    /// Aggregated size in bytes (sum of all descendant file sizes).
+    /// Aggregated size in bytes (includes children for directories).
     pub size: u64,
-    /// Total number of descendant files.
-    pub file_count: usize,
+    /// Total number of descendant items.
+    pub item_count: u64,
     /// Whether this node represents a directory.
     pub is_dir: bool,
-    /// Scan progress as a value in `[0.0, 1.0]`; `None` if scanning is complete.
-    pub scan_progress: Option<f64>,
-    /// Direct child nodes.
+    /// Child nodes (populated for directories).
     pub children: Vec<FsNode>,
-    /// Size before the current scan (populated from a baseline map).
+    /// Previous size from baseline snapshot, if available.
     pub prev_size: Option<u64>,
 }
 
 impl FsNode {
-    /// Creates a new `FsNode` with no children and no previous size.
-    pub fn new(id: u64, path: PathBuf, size: u64, file_count: usize, is_dir: bool) -> Self {
+    /// Creates a new `FsNode` from a `DbNode` with no children.
+    pub fn from_db_node(db: DbNode) -> Self {
         Self {
-            id,
-            path,
-            size,
-            file_count,
-            is_dir,
-            scan_progress: None,
+            id: db.id,
+            parent_id: db.parent_id,
+            name: db.name,
+            path: db.path,
+            size: db.size,
+            item_count: db.item_count,
+            is_dir: db.is_dir,
             children: Vec::new(),
             prev_size: None,
         }
     }
 }
 
-/// A flattened node suitable for rendering in a UI list.
+/// A flattened node suitable for UI rendering.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UiNode {
     /// Unique identifier for this node.
     pub id: u64,
-    /// Filesystem path of this node.
+    /// Display name of the node.
+    pub name: String,
+    /// Absolute path of the node on the filesystem.
     pub path: PathBuf,
     /// Aggregated size in bytes.
     pub size: u64,
-    /// Total number of descendant files.
-    pub file_count: usize,
+    /// Total number of descendant items.
+    pub item_count: u64,
     /// Whether this node represents a directory.
     pub is_dir: bool,
-    /// Depth in the tree (root = 0).
+    /// Depth level in the tree (0 = root children).
     pub depth: usize,
-    /// Whether this directory node is currently expanded in the UI.
+    /// Whether this node is currently expanded in the UI.
     pub is_expanded: bool,
-    /// Fraction of the largest sibling's size; `None` for root or if siblings have zero size.
-    pub size_fraction: Option<f64>,
-    /// Scan progress as a value in `[0.0, 1.0]`; `None` if scanning is complete.
-    pub scan_progress: Option<f64>,
-    /// Size before the current scan.
+    /// Scan progress as a fraction [0.0, 1.0] relative to the largest sibling.
+    pub scan_progress: f64,
+    /// Previous size from baseline snapshot, if available.
     pub prev_size: Option<u64>,
 }
 
-/// The set of paths that are currently expanded in the UI.
-pub type ExpandedPaths = HashSet<PathBuf>;
+/// A map from filesystem path to size in bytes, used as a baseline snapshot.
+pub type BaselineMap = HashMap<PathBuf, u64>;

@@ -1,21 +1,21 @@
-//! Reconstructs an [`FsNode`] hierarchy from a flat [`DbNode`] list via `parent_id`.
+//! Reconstructs an `FsNode` hierarchy from a flat list of `DbNode` records.
 
 use std::collections::HashMap;
 use crate::models::{DbNode, FsNode};
 
-/// Reconstructs a forest of [`FsNode`] trees from a flat list of [`DbNode`] records.
+/// Builds a forest of `FsNode` trees from a flat list of `DbNode` records.
 ///
-/// Nodes whose `parent_id` is `None` become root nodes. All other nodes are
-/// attached to their parent. Nodes referencing a non-existent `parent_id` are
-/// silently promoted to root nodes.
+/// Nodes are linked via `parent_id`. Nodes whose `parent_id` is `None` or whose
+/// parent is not present in the list become root nodes.
 ///
 /// # Arguments
 ///
-/// * `nodes` — Flat list of database node records.
+/// * `nodes` - A flat list of database node records.
 ///
 /// # Returns
 ///
-/// A `Vec<FsNode>` containing the root nodes of the reconstructed forest.
+/// A `Vec<FsNode>` containing the root nodes of the reconstructed hierarchy,
+/// with children populated recursively.
 ///
 /// # Examples
 ///

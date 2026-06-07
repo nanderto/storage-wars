@@ -1,21 +1,27 @@
-//! Converts a nested [`FsNode`] tree to a flat `Vec<UiNode>` for UI rendering.
+//! Converts a nested `FsNode` hierarchy to a flat `Vec<UiNode>` for UI rendering.
 
-use crate::models::{ExpandedPaths, FsNode, UiNode};
+use std::collections::HashSet;
+use std::path::PathBuf;
+use crate::models::{FsNode, UiNode};
 
-/// Flattens a forest of [`FsNode`] trees into a `Vec<UiNode>` for UI rendering.
+/// Flattens a slice of root `FsNode` trees into a `Vec<UiNode>` for UI rendering.
 ///
-/// Only children of nodes whose paths appear in `expanded_paths` are included.
-/// Each node's `size_fraction` is computed as a fraction of the largest sibling's
-/// size at the same level (or `scan_progress` if the node is still being scanned).
+/// Only nodes whose ancestors are all present in `expanded_paths` are included
+/// (i.e., the tree is traversed depth-first but children are only visited when
+/// the parent path is expanded). Root nodes are always included.
+///
+/// `scan_progress` for each node is computed as `node.size / max_sibling_size`
+/// where `max_sibling_size` is the largest size among siblings at the same level.
+/// If all siblings have size 0, `scan_progress` defaults to `0.0`.
 ///
 /// # Arguments
 ///
-/// * `roots`          — Root nodes of the filesystem tree.
-/// * `expanded_paths` — Set of directory paths that are currently expanded.
+/// * `roots` - Slice of root `FsNode` trees to flatten.
+/// * `expanded_paths` - Set of paths that are currently expanded in the UI.
 ///
 /// # Returns
 ///
-/// A depth-first, pre-order `Vec<UiNode>` ready for rendering.
+/// A `Vec<UiNode>` in depth-first pre-order traversal order.
 ///
 /// # Examples
 ///
