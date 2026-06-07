@@ -1,17 +1,19 @@
 [package]
 name = "storage-wars"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
-description = "Storage Wars desktop application — auction unit storage management"
 license.workspace = true
+description = "Storage Wars — desktop application for managing storage units"
+publish = false
 
 [[bin]]
 name = "storage-wars"
 path = "src/main.rs"
 
 [dependencies]
-# GPUI is sourced from the Zed monorepo.
-# Pin to a specific commit for reproducible builds.
-gpui = { git = "https://github.com/zed-industries/zed", rev = "0.169.2" }
+gpui = { git = "https://github.com/zed-industries/zed", package = "gpui", rev = "0f5b37f" }
+anyhow = "1.0"
 log = "0.4"
 env_logger = "0.11"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

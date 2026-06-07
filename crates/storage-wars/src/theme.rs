@@ -1,64 +1,87 @@
-//! Dark theme colour palette for Storage Wars.
-//!
-//! All colours are defined as [`gpui::Rgba`] constants so they can be used
-//! directly in GPUI style methods (`.bg(theme::BACKGROUND)`, etc.).
+//! Application theme — colour palette and typography constants for the dark
+//! theme used throughout Storage Wars.
 
-use gpui::{rgb, Rgba};
+use gpui::{hsla, Hsla};
 
-// ── Backgrounds ───────────────────────────────────────────────────────────────
+/// The Storage Wars colour theme.
+///
+/// All colours are expressed as HSLA values so they can be passed directly to
+/// GPUI style methods.
+#[derive(Debug, Clone)]
+pub struct StorageWarsTheme {
+    // ── Surfaces ──────────────────────────────────────────────────────────────
+    /// Primary window / panel background.
+    pub background: Hsla,
+    /// Slightly elevated surface (cards, sidebars).
+    pub surface: Hsla,
+    /// Highest elevation surface (modals, popovers).
+    pub overlay: Hsla,
 
-/// Primary application background — deep dark slate.
-pub const BACKGROUND: Rgba = rgb(0x0f1117);
+    // ── Borders ───────────────────────────────────────────────────────────────
+    /// Subtle border between UI regions.
+    pub border: Hsla,
+    /// Focused / active border.
+    pub border_focused: Hsla,
 
-/// Secondary / surface background (panels, sidebars).
-pub const SURFACE: Rgba = rgb(0x1a1d27);
+    // ── Text ──────────────────────────────────────────────────────────────────
+    /// Primary text colour.
+    pub foreground: Hsla,
+    /// Secondary / muted text colour.
+    pub foreground_muted: Hsla,
+    /// Disabled text colour.
+    pub foreground_disabled: Hsla,
 
-/// Elevated surface (cards, modals, dropdowns).
-pub const ELEVATED: Rgba = rgb(0x22263a);
+    // ── Accent ────────────────────────────────────────────────────────────────
+    /// Brand accent — used for interactive elements and highlights.
+    pub accent: Hsla,
+    /// Accent colour on hover.
+    pub accent_hover: Hsla,
+    /// Text rendered on top of the accent colour.
+    pub accent_foreground: Hsla,
 
-// ── Borders ───────────────────────────────────────────────────────────────────
+    // ── Status ────────────────────────────────────────────────────────────────
+    pub success: Hsla,
+    pub warning: Hsla,
+    pub error: Hsla,
 
-/// Default border / divider colour.
-pub const BORDER: Rgba = rgb(0x2e3347);
+    // ── Title bar ─────────────────────────────────────────────────────────────
+    /// Title bar background (slightly different from the main background).
+    pub title_bar_background: Hsla,
+    /// Title bar text / icon colour.
+    pub title_bar_foreground: Hsla,
+}
 
-/// Subtle border (used for inner separators).
-pub const BORDER_SUBTLE: Rgba = rgb(0x1e2235);
+impl StorageWarsTheme {
+    /// Returns the canonical dark theme for Storage Wars.
+    pub fn dark() -> Self {
+        Self {
+            // Surfaces — deep charcoal palette
+            background: hsla(220.0 / 360.0, 0.13, 0.11, 1.0),
+            surface: hsla(220.0 / 360.0, 0.13, 0.15, 1.0),
+            overlay: hsla(220.0 / 360.0, 0.13, 0.19, 1.0),
 
-// ── Text ──────────────────────────────────────────────────────────────────────
+            // Borders
+            border: hsla(220.0 / 360.0, 0.10, 0.25, 1.0),
+            border_focused: hsla(220.0 / 360.0, 0.60, 0.55, 1.0),
 
-/// Primary text — near white.
-pub const TEXT_PRIMARY: Rgba = rgb(0xe8eaf0);
+            // Text
+            foreground: hsla(220.0 / 360.0, 0.15, 0.90, 1.0),
+            foreground_muted: hsla(220.0 / 360.0, 0.10, 0.60, 1.0),
+            foreground_disabled: hsla(220.0 / 360.0, 0.05, 0.40, 1.0),
 
-/// Secondary / muted text.
-pub const TEXT_SECONDARY: Rgba = rgb(0x8b91a8);
+            // Accent — electric blue
+            accent: hsla(217.0 / 360.0, 0.91, 0.60, 1.0),
+            accent_hover: hsla(217.0 / 360.0, 0.91, 0.68, 1.0),
+            accent_foreground: hsla(0.0, 0.0, 1.0, 1.0),
 
-/// Disabled / placeholder text.
-pub const TEXT_DISABLED: Rgba = rgb(0x4a5068);
+            // Status colours
+            success: hsla(142.0 / 360.0, 0.71, 0.45, 1.0),
+            warning: hsla(38.0 / 360.0, 0.92, 0.50, 1.0),
+            error: hsla(0.0 / 360.0, 0.84, 0.60, 1.0),
 
-// ── Accent (auction amber) ────────────────────────────────────────────────────
-
-/// Brand accent — auction amber.
-pub const ACCENT: Rgba = rgb(0xf5a623);
-
-/// Accent hover state.
-pub const ACCENT_HOVER: Rgba = rgb(0xf7b84b);
-
-/// Accent pressed / active state.
-pub const ACCENT_ACTIVE: Rgba = rgb(0xe09415);
-
-/// Accent foreground text (used on accent-coloured backgrounds).
-pub const ACCENT_FOREGROUND: Rgba = rgb(0x0f1117);
-
-// ── Semantic colours ──────────────────────────────────────────────────────────
-
-/// Success / positive indicator (green).
-pub const SUCCESS: Rgba = rgb(0x4caf7d);
-
-/// Warning indicator (amber — same hue as accent).
-pub const WARNING: Rgba = rgb(0xf5a623);
-
-/// Error / destructive indicator (red).
-pub const ERROR: Rgba = rgb(0xef5350);
-
-/// Informational indicator (blue).
-pub const INFO: Rgba = rgb(0x42a5f5);
+            // Title bar — slightly darker than the main background
+            title_bar_background: hsla(220.0 / 360.0, 0.13, 0.09, 1.0),
+            title_bar_foreground: hsla(220.0 / 360.0, 0.15, 0.85, 1.0),
+        }
+    }
+}

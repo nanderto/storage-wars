@@ -1,109 +1,117 @@
-//! Storage Wars — entry point.
+//! Storage Wars — desktop application entry point.
 //!
-//! Initialises the GPUI application, opens a 1280×800 centered window with a
-//! dark theme and a custom transparent title bar, then hands control to the
-//! GPUI event loop.
+//! Initializes the GPUI application with a 1280×800 window,
+//! dark theme, centered positioning, and a custom title bar.
 
-use gpui::{
-    actions, div, px, size, App, AppContext, Bounds, Context, Element, IntoElement,
-    KeyBinding, ParentElement, Point, Render, Styled, TitlebarOptions, ViewContext,
-    VisualContext, WindowBackgroundAppearance, WindowBounds, WindowKind, WindowOptions,
-};
+#![allow(unused)]
 
+mod app;
 mod theme;
+mod title_bar;
+mod ui;
 
-// ── Application-level actions ────────────────────────────────────────────────
+use anyhow::Result;
+use gpui::{
+    actions, App, Application, Bounds, Context, Menu, MenuItem, Point, Size, TitlebarOptions,
+    WindowBounds, WindowKind, WindowOptions,
+};
+use log::info;
+
+use app::StorageWarsApp;
+use theme::StorageWarsTheme;
+
+/// Application identifier used by the OS for window management.
+const APP_ID: &str = "com.storage-wars.app";
+
+/// Default window width in logical pixels.
+const WINDOW_WIDTH: f32 = 1280.0;
+
+/// Default window height in logical pixels.
+const WINDOW_HEIGHT: f32 = 800.0;
+
+/// Application display name shown in menus and the title bar.
+const APP_NAME: &str = "Storage Wars";
 
 actions!(storage_wars, [Quit]);
 
-// ── Root view ────────────────────────────────────────────────────────────────
-
-/// The top-level GPUI view for the Storage Wars application.
-struct StorageWarsApp;
-
-impl Render for StorageWarsApp {
-    fn render(&mut self, _cx: &mut ViewContext<Self>) -> impl IntoElement {
-        div()
-            .flex()
-            .flex_col()
-            .size_full()
-            .bg(theme::BACKGROUND)
-            .text_color(theme::TEXT_PRIMARY)
-            // ── Title bar spacer (transparent title bar eats ~28 px on macOS) ──
-            .child(div().h(px(28.0)))
-            // ── Main content area ─────────────────────────────────────────────
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .items_center()
-                    .justify_center()
-                    .gap(px(8.0))
-                    .child(
-                        div()
-                            .text_xl()
-                            .font_weight(gpui::FontWeight::BOLD)
-                            .text_color(theme::ACCENT)
-                            .child("Storage Wars"),
-                    )
-                    .child(
-                        div()
-                            .text_color(theme::TEXT_SECONDARY)
-                            .child("Auction unit storage management"),
-                    ),
-            )
-    }
-}
-
-// ── Entry point ───────────────────────────────────────────────────────────────
-
 fn main() {
-    // Initialise logging from the `RUST_LOG` environment variable.
-    env_logger::init();
+    // Initialize logging — respects the `RUST_LOG` environment variable.
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    App::new().run(|cx: &mut AppContext| {
-        // Register global quit action.
+    info!("Starting {} v{}", APP_NAME, env!("CARGO_PKG_VERSION"));
+
+    Application::new().run(|cx: &mut App| {
+        // Register global application menu (macOS menu bar / system menu).
+        cx.set_menus(build_menus());
+
+        // Bind the Quit action to the standard keyboard shortcut.
         cx.on_action(|_: &Quit, cx| cx.quit());
 
-        // Bind ⌘Q (macOS) / Ctrl+Q (Linux / Windows) to Quit.
-        cx.bind_keys([
-            KeyBinding::new("cmd-q", Quit, None),
-            KeyBinding::new("ctrl-q", Quit, None),
-        ]);
-
-        // Open the main application window.
-        let window_options = build_window_options(cx);
-        cx.open_window(window_options, |cx| {
-            cx.new_view(|_cx| StorageWarsApp)
-        })
-        .expect("Failed to open the Storage Wars main window");
+        // Open the primary application window.
+        open_main_window(cx).expect("Failed to open main window");
     });
 }
 
-/// Constructs [`WindowOptions`] for the main 1280×800 centered window.
-fn build_window_options(cx: &AppContext) -> WindowOptions {
-    WindowOptions {
+/// Constructs the application menu bar.
+fn build_menus() -> Vec<Menu> {
+    vec![
+        Menu {
+            name: APP_NAME.into(),
+            items: vec![
+                MenuItem::action("Quit", Quit),
+            ],
+        },
+        Menu {
+            name: "File".into(),
+            items: vec![],
+        },
+        Menu {
+            name: "View".into(),
+            items: vec![],
+        },
+        Menu {
+            name: "Help".into(),
+            items: vec![],
+        },
+    ]
+}
+
+/// Opens the main application window centered on the primary display.
+fn open_main_window(cx: &mut App) -> Result<()> {
+    let window_size = Size {
+        width: gpui::px(WINDOW_WIDTH),
+        height: gpui::px(WINDOW_HEIGHT),
+    };
+
+    let window_options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
             None,
-            size(px(1280.0), px(800.0)),
+            window_size,
             cx,
         ))),
         titlebar: Some(TitlebarOptions {
-            title: Some("Storage Wars".into()),
+            title: Some(APP_NAME.into()),
             appears_transparent: true,
             traffic_light_position: Some(Point {
-                x: px(9.0),
-                y: px(9.0),
+                x: gpui::px(12.0),
+                y: gpui::px(12.0),
             }),
         }),
-        window_min_size: Some(size(px(800.0), px(600.0))),
+        window_min_size: Some(Size {
+            width: gpui::px(800.0),
+            height: gpui::px(600.0),
+        }),
         kind: WindowKind::Normal,
         is_movable: true,
         display_id: None,
-        window_background: WindowBackgroundAppearance::Blurred,
-        focus: true,
-        show: true,
-        app_id: Some("storage-wars".to_string()),
-    }
+        window_background: gpui::WindowBackgroundAppearance::Blurred,
+        app_id: Some(APP_ID.into()),
+        ..Default::default()
+    };
+
+    cx.open_window(window_options, |window, cx| {
+        cx.new(|cx| StorageWarsApp::new(window, cx))
+    })?;
+
+    Ok(())
 }

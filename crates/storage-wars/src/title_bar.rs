@@ -1,43 +1,76 @@
-use gpui::{div, px, Entity, IntoElement, ParentElement, Render, SharedString, Styled, ViewContext};
+//! Custom title bar component rendered at the top of the main window.
+//!
+//! On macOS the native traffic-light buttons are positioned by GPUI; this
+//! component fills the remaining space with the application name and any
+//! future toolbar actions.
+
+use gpui::{
+    div, px, AnyElement, Element, IntoElement, ParentElement, RenderOnce, Styled,
+};
 
 use crate::theme::StorageWarsTheme;
 
-/// Custom title-bar component rendered inside the transparent native title bar.
+/// Height of the title bar in logical pixels.
+pub const TITLE_BAR_HEIGHT: f32 = 36.0;
+
+/// Left padding that clears the macOS traffic-light buttons.
+const TRAFFIC_LIGHT_CLEARANCE: f32 = 72.0;
+
+/// The custom title bar element.
+#[derive(IntoElement)]
 pub struct TitleBar {
-    title: SharedString,
     theme: StorageWarsTheme,
 }
 
 impl TitleBar {
-    pub fn new(title: impl Into<SharedString>) -> Self {
-        Self {
-            title: title.into(),
-            theme: StorageWarsTheme::dark(),
-        }
+    /// Creates a new [`TitleBar`] with the given theme.
+    pub fn new(theme: StorageWarsTheme) -> Self {
+        Self { theme }
     }
 }
 
-impl Render for TitleBar {
-    fn render(&mut self, _cx: &mut ViewContext<Self>) -> impl IntoElement {
-        let theme = self.theme.clone();
-
+impl RenderOnce for TitleBar {
+    fn render(self, _window: &mut gpui::Window, _cx: &mut gpui::App) -> impl IntoElement {
         div()
+            // Allow the OS / GPUI to use this region for window dragging.
+            .id("title-bar")
             .flex()
             .flex_row()
             .items_center()
-            .justify_center()
             .w_full()
-            .h(px(40.0))
-            .bg(theme.title_bar_background)
+            .h(px(TITLE_BAR_HEIGHT))
+            .bg(self.theme.title_bar_background)
             .border_b_1()
-            .border_color(theme.border)
-            // Leave space on the left for macOS traffic lights (≈ 72 px).
-            .pl(px(72.0))
+            .border_color(self.theme.border)
+            // Pad left to avoid overlapping the macOS traffic-light buttons.
+            .pl(px(TRAFFIC_LIGHT_CLEARANCE))
+            .pr(px(16.0))
             .child(
                 div()
-                    .text_sm()
-                    .text_color(theme.muted)
-                    .child(self.title.clone()),
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(app_icon())
+                    .child(app_title(&self.theme)),
             )
     }
+}
+
+/// Renders a simple coloured square as a placeholder application icon.
+fn app_icon() -> impl IntoElement {
+    div()
+        .w(px(16.0))
+        .h(px(16.0))
+        .rounded(px(3.0))
+        .bg(gpui::hsla(217.0 / 360.0, 0.91, 0.60, 1.0))
+}
+
+/// Renders the application name label.
+fn app_title(theme: &StorageWarsTheme) -> impl IntoElement {
+    div()
+        .text_sm()
+        .font_weight(gpui::FontWeight::SEMIBOLD)
+        .text_color(theme.title_bar_foreground)
+        .child("Storage Wars")
 }

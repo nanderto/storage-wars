@@ -1,13 +1,13 @@
 # Storage Wars
 
-> Auction unit storage management — desktop application built with Rust + GPUI.
+A desktop application for managing storage units, built with Rust and [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui).
 
 ## Prerequisites
 
-| Tool | Version |
-|------|---------|
-| Rust | stable (see `rust-toolchain.toml`) |
-| Xcode Command Line Tools | macOS only |
-| `libxcb`, `libxkbcommon` | Linux only |
+| Dependency | Version | Notes |
+|---|---|---|
+| Rust | stable (≥ 1.78) | via `rustup` |
+| Xcode Command Line Tools | latest | macOS only |
+| `libsqlite3-dev` | any | Linux only |
 
 ## Building
