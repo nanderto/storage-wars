@@ -1,21 +1,21 @@
-//! Baseline snapshot utilities: building a path→size map and merging it into a tree.
+//! Baseline map construction and merging for size change detection.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use crate::models::{BaselineMap, FsNode};
+use crate::models::{FsNode, UiNode};
 
-/// Builds a `BaselineMap` (path → size) from a slice of `FsNode` trees.
+/// Builds a `PathBuf → u64` lookup map from a slice of `FsNode` records.
 ///
-/// All nodes in the forest are visited recursively, and each node's path and
-/// size are inserted into the map.
+/// The map associates each node's path with its size, enabling efficient
+/// baseline comparisons after a re-scan.
 ///
 /// # Arguments
 ///
-/// * `roots` - Slice of root `FsNode` trees to traverse.
+/// * `nodes` - A flat slice of `FsNode` records to index.
 ///
 /// # Returns
 ///
-/// A `HashMap<PathBuf, u64>` mapping each node's path to its size.
+/// A `HashMap<PathBuf, u64>` mapping each path to its size.
 ///
 /// # Examples
 ///

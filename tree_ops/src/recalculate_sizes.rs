@@ -1,16 +1,17 @@
-//! Bottom-up size and item count recalculation for `FsNode` trees.
+//! Bottom-up size and file count recalculation for `FsNode` trees.
 
 use crate::models::FsNode;
 
-/// Recalculates sizes and item counts for all nodes in a forest by walking bottom-up.
+/// Recalculates sizes and file counts for all directory nodes in the tree
+/// by walking bottom-up and summing children's values.
 ///
-/// For each directory node, `size` is set to the sum of all children's sizes,
-/// and `item_count` is set to the total number of descendant leaf (non-directory) nodes.
-/// Leaf nodes (files) retain their original `size` and have `item_count = 1`.
+/// Leaf nodes (files) retain their existing `size` and `file_count`.
+/// Directory nodes have their `size` and `file_count` replaced with the
+/// sum of their children's values.
 ///
 /// # Arguments
 ///
-/// * `roots` - Mutable slice of root `FsNode` trees to recalculate.
+/// * `node` - Mutable reference to the root `FsNode` to recalculate.
 ///
 /// # Examples
 ///

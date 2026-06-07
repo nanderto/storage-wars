@@ -2,20 +2,18 @@
 name = "tree_ops"
 version = "0.1.0"
 edition = "2021"
-description = "Tree manipulation utilities for filesystem node hierarchies"
+description = "Tree manipulation utilities for FsNode hierarchy reconstruction, flattening, and size recalculation"
 authors = []
-
-[[bin]]
-name = "tree_ops"
-path = "src/main.rs"
 
 [lib]
 name = "tree_ops"
 path = "src/lib.rs"
 
 [dependencies]
+# No external dependencies required for core tree manipulation logic
 
 [dev-dependencies]
+# No external test dependencies required
 
 [profile.release]
 opt-level = 3

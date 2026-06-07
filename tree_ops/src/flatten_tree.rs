@@ -1,27 +1,24 @@
-//! Converts a nested `FsNode` hierarchy to a flat `Vec<UiNode>` for UI rendering.
+//! Converts a nested `FsNode` tree to a flat `Vec<UiNode>` for UI rendering.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
 use crate::models::{FsNode, UiNode};
 
-/// Flattens a slice of root `FsNode` trees into a `Vec<UiNode>` for UI rendering.
+/// Flattens a nested `FsNode` tree into a `Vec<UiNode>` for UI rendering.
 ///
 /// Only nodes whose ancestors are all present in `expanded_paths` are included
-/// (i.e., the tree is traversed depth-first but children are only visited when
-/// the parent path is expanded). Root nodes are always included.
-///
-/// `scan_progress` for each node is computed as `node.size / max_sibling_size`
-/// where `max_sibling_size` is the largest size among siblings at the same level.
-/// If all siblings have size 0, `scan_progress` defaults to `0.0`.
+/// (beyond the root level). For nodes with a non-`None` `scan_progress`, the
+/// progress value is expressed as a fraction of the largest sibling's size.
 ///
 /// # Arguments
 ///
-/// * `roots` - Slice of root `FsNode` trees to flatten.
-/// * `expanded_paths` - Set of paths that are currently expanded in the UI.
+/// * `root` - The root `FsNode` to flatten.
+/// * `expanded_paths` - Set of paths whose children should be included in output.
+/// * `depth` - Starting depth (typically `0` for the root call).
 ///
 /// # Returns
 ///
-/// A `Vec<UiNode>` in depth-first pre-order traversal order.
+/// A `Vec<UiNode>` in pre-order traversal order.
 ///
 /// # Examples
 ///

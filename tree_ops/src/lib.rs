@@ -1,6 +1,7 @@
 //! # tree_ops
 //!
-//! Tree manipulation utilities for filesystem node hierarchies.
+//! Tree manipulation utilities for FsNode hierarchy reconstruction,
+//! flattening, and size recalculation.
 //!
 //! ## Overview
 //!
@@ -9,7 +10,7 @@
 //! - [`build_fs_tree`]: Reconstructs an `FsNode` hierarchy from a flat `DbNode` list via `parent_id`.
 //! - [`flatten_tree`]: Converts a nested `FsNode` to `Vec<UiNode>` respecting `expanded_paths`
 //!   with `scan_progress` as a fraction of the largest sibling.
-//! - [`recalculate_sizes`]: Walks the tree bottom-up, summing sizes and counts.
+//! - [`recalculate_sizes`]: Walks bottom-up summing sizes and counts.
 //! - [`insert_children`]: Finds a parent node and replaces its children.
 //! - [`build_baseline_map`]: Creates a `PathBuf → u64` lookup map.
 //! - [`merge_baseline`]: Populates `prev_size` from a baseline map.

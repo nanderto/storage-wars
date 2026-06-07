@@ -1,91 +1,75 @@
 //! Data models shared across tree_ops operations.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 
-/// A flat database record representing a single filesystem node.
+/// A flat database node as stored/retrieved from persistence.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DbNode {
     /// Unique identifier for this node.
     pub id: u64,
     /// Identifier of the parent node; `None` for root nodes.
     pub parent_id: Option<u64>,
-    /// Display name of the node (file or directory name).
-    pub name: String,
-    /// Absolute path of the node on the filesystem.
+    /// Filesystem path of this node.
     pub path: PathBuf,
-    /// Size in bytes of this node (file size, or 0 for directories before aggregation).
+    /// Size in bytes of this node (file size or directory total).
     pub size: u64,
-    /// Number of direct or total child items (0 for files).
-    pub item_count: u64,
+    /// Number of files contained within (1 for files, N for directories).
+    pub file_count: u64,
     /// Whether this node represents a directory.
     pub is_dir: bool,
 }
 
-/// A hierarchical filesystem node, potentially containing children.
+/// A node in the reconstructed filesystem tree hierarchy.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FsNode {
     /// Unique identifier for this node.
     pub id: u64,
-    /// Identifier of the parent node; `None` for root nodes.
-    pub parent_id: Option<u64>,
-    /// Display name of the node.
-    pub name: String,
-    /// Absolute path of the node on the filesystem.
+    /// Filesystem path of this node.
     pub path: PathBuf,
-    /// Aggregated size in bytes (includes children for directories).
+    /// Size in bytes of this node.
     pub size: u64,
-    /// Total number of descendant items.
-    pub item_count: u64,
+    /// Number of files contained within.
+    pub file_count: u64,
     /// Whether this node represents a directory.
     pub is_dir: bool,
     /// Child nodes (populated for directories).
     pub children: Vec<FsNode>,
-    /// Previous size from baseline snapshot, if available.
-    pub prev_size: Option<u64>,
-}
-
-impl FsNode {
-    /// Creates a new `FsNode` from a `DbNode` with no children.
-    pub fn from_db_node(db: DbNode) -> Self {
-        Self {
-            id: db.id,
-            parent_id: db.parent_id,
-            name: db.name,
-            path: db.path,
-            size: db.size,
-            item_count: db.item_count,
-            is_dir: db.is_dir,
-            children: Vec::new(),
-            prev_size: None,
-        }
-    }
+    /// Progress of an ongoing scan (0.0–1.0); `None` if scan is complete.
+    pub scan_progress: Option<f64>,
 }
 
 /// A flattened node suitable for UI rendering.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UiNode {
-    /// Unique identifier for this node.
-    pub id: u64,
-    /// Display name of the node.
-    pub name: String,
-    /// Absolute path of the node on the filesystem.
+    /// Filesystem path of this node.
     pub path: PathBuf,
-    /// Aggregated size in bytes.
+    /// Size in bytes of this node.
     pub size: u64,
-    /// Total number of descendant items.
-    pub item_count: u64,
+    /// Number of files contained within.
+    pub file_count: u64,
     /// Whether this node represents a directory.
     pub is_dir: bool,
-    /// Depth level in the tree (0 = root children).
+    /// Depth level in the tree (root = 0).
     pub depth: usize,
-    /// Whether this node is currently expanded in the UI.
+    /// Whether this directory node is currently expanded in the UI.
     pub is_expanded: bool,
-    /// Scan progress as a fraction [0.0, 1.0] relative to the largest sibling.
-    pub scan_progress: f64,
-    /// Previous size from baseline snapshot, if available.
+    /// Scan progress as a fraction of the largest sibling (0.0–1.0).
+    pub scan_progress: Option<f64>,
+    /// Previous size from baseline for change detection; `None` if no baseline.
     pub prev_size: Option<u64>,
 }
 
-/// A map from filesystem path to size in bytes, used as a baseline snapshot.
-pub type BaselineMap = HashMap<PathBuf, u64>;
+impl FsNode {
+    /// Creates a new leaf `FsNode` with no children.
+    pub fn new_leaf(id: u64, path: PathBuf, size: u64, file_count: u64, is_dir: bool) -> Self {
+        Self {
+            id,
+            path,
+            size,
+            file_count,
+            is_dir,
+            children: Vec::new(),
+            scan_progress: None,
+        }
+    }
+}
