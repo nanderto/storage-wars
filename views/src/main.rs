@@ -3,15 +3,17 @@ mod drive_selector;
 mod scan_history;
 mod title_bar;
 mod tree_view;
-mod theme;
 mod types;
+mod ui_helpers;
 
 use anyhow::Result;
 use gpui::{
-    actions, App, Application, Bounds, Context, TitlebarOptions, Window, WindowBounds,
-    WindowOptions,
+    actions, App, Application, AppContext, Bounds, KeyBinding, Menu, MenuItem, TitlebarOptions,
+    WindowBounds, WindowKind, WindowOptions,
 };
 use log::info;
+
+use app_view::AppView;
 
 actions!(views_app, [Quit]);
 
@@ -20,42 +22,41 @@ fn main() -> Result<()> {
 
     info!("Starting views application");
 
-    let app = Application::new();
+    Application::new().run(|cx: &mut AppContext| {
+        cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
 
-    app.run(|cx: &mut App| {
-        cx.on_action(|_: &Quit, cx| cx.quit());
+        cx.on_action(|_: &Quit, cx| {
+            cx.quit();
+        });
 
-        cx.bind_keys([gpui::KeyBinding::new(
-            "cmd-q",
-            Quit,
-            None,
-        )]);
+        cx.set_menus(vec![Menu {
+            name: "Views".into(),
+            items: vec![MenuItem::action("Quit", Quit)],
+        }]);
 
-        let bounds = Bounds::centered(None, gpui::size(gpui::px(1280.0), gpui::px(800.0)), cx);
+        let window_options = WindowOptions {
+            titlebar: Some(TitlebarOptions {
+                title: None,
+                appears_transparent: true,
+                traffic_light_position: None,
+            }),
+            window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
+                None,
+                gpui::size(gpui::px(1200.0), gpui::px(800.0)),
+                cx,
+            ))),
+            kind: WindowKind::Normal,
+            is_movable: true,
+            display_id: None,
+            window_background: gpui::WindowBackgroundAppearance::Blurred,
+            focus: true,
+            show: true,
+            window_min_size: Some(gpui::size(gpui::px(800.0), gpui::px(600.0))),
+            app_id: Some("views".to_string()),
+        };
 
-        cx.open_window(
-            WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(bounds)),
-                titlebar: Some(TitlebarOptions {
-                    title: Some("Disk Analyzer — Views".into()),
-                    appears_transparent: true,
-                    traffic_light_position: None,
-                }),
-                focus: true,
-                show: true,
-                kind: gpui::WindowKind::Normal,
-                is_movable: true,
-                display_id: None,
-                window_background: gpui::WindowBackgroundAppearance::Opaque,
-                app_id: Some("com.diskanalyzer.views".to_string()),
-                window_min_size: Some(gpui::size(gpui::px(800.0), gpui::px(600.0))),
-                window_decorations: None,
-            },
-            |window, cx| {
-                cx.new(|cx| app_view::AppView::new(window, cx))
-            },
-        )
-        .expect("failed to open window");
+        cx.open_window(window_options, |cx| cx.new_view(|cx| AppView::new(cx)))
+            .expect("Failed to open main window");
     });
 
     Ok(())

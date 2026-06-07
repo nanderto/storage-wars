@@ -2,57 +2,50 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-/// Represents a storage drive or mount point.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Represents a storage drive available for scanning
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DriveInfo {
-    pub id: Uuid,
-    pub path: String,
-    pub label: Option<String>,
+    pub id: String,
+    pub mount_point: String,
+    pub volume_label: Option<String>,
     pub total_bytes: u64,
-    pub free_bytes: u64,
-    pub used_bytes: u64,
+    pub available_bytes: u64,
+    pub file_system: Option<String>,
 }
 
 impl DriveInfo {
-    pub fn display_label(&self) -> String {
-        match &self.label {
-            Some(label) if !label.is_empty() => {
-                format!("{} ({})", label, self.path)
-            }
-            _ => self.path.clone(),
-        }
+    pub fn used_bytes(&self) -> u64 {
+        self.total_bytes.saturating_sub(self.available_bytes)
     }
 
-    pub fn used_percent(&self) -> f32 {
+    pub fn usage_percent(&self) -> f64 {
         if self.total_bytes == 0 {
             return 0.0;
         }
-        (self.used_bytes as f32 / self.total_bytes as f32) * 100.0
+        (self.used_bytes() as f64 / self.total_bytes as f64) * 100.0
+    }
+
+    /// Format a human-readable label for the drive selector
+    pub fn display_label(&self) -> String {
+        let size_str = format_bytes(self.total_bytes);
+        match &self.volume_label {
+            Some(label) if !label.is_empty() => {
+                format!("{} ({}) — {}", label, self.mount_point, size_str)
+            }
+            _ => format!("{} — {}", self.mount_point, size_str),
+        }
     }
 }
 
-/// Represents a single scan result entry.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ScanEntry {
-    pub id: Uuid,
-    pub drive_id: Uuid,
-    pub label: String,
-    pub scanned_at: DateTime<Utc>,
-    pub total_bytes: u64,
-    pub file_count: u64,
-    pub folder_count: u64,
-}
-
-/// A node in the file-system tree.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// A single node in the file system tree
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TreeNode {
     pub id: Uuid,
     pub name: String,
     pub path: String,
     pub depth: usize,
-    pub is_dir: bool,
+    pub is_directory: bool,
     pub size_bytes: u64,
-    pub prev_size_bytes: Option<u64>,
     pub file_count: u64,
     pub folder_count: u64,
     pub modified_at: Option<DateTime<Utc>>,
@@ -61,206 +54,207 @@ pub struct TreeNode {
 }
 
 impl TreeNode {
-    pub fn size_change(&self) -> SizeChange {
-        match self.prev_size_bytes {
-            None => SizeChange::New,
-            Some(prev) if self.size_bytes > prev => SizeChange::Increased,
-            Some(prev) if self.size_bytes < prev => SizeChange::Decreased,
-            _ => SizeChange::Unchanged,
+    pub fn new_dir(name: impl Into<String>, path: impl Into<String>, depth: usize) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            name: name.into(),
+            path: path.into(),
+            depth,
+            is_directory: true,
+            size_bytes: 0,
+            file_count: 0,
+            folder_count: 0,
+            modified_at: None,
+            children: Vec::new(),
+            is_expanded: false,
         }
     }
 
-    pub fn percent_of_parent(&self, parent_size: u64) -> f32 {
-        if parent_size == 0 {
-            return 0.0;
+    pub fn new_file(
+        name: impl Into<String>,
+        path: impl Into<String>,
+        depth: usize,
+        size_bytes: u64,
+    ) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            name: name.into(),
+            path: path.into(),
+            depth,
+            is_directory: false,
+            size_bytes,
+            file_count: 1,
+            folder_count: 0,
+            modified_at: None,
+            children: Vec::new(),
+            is_expanded: false,
         }
-        (self.size_bytes as f32 / parent_size as f32) * 100.0
-    }
-
-    pub fn percent_change(&self) -> Option<f32> {
-        self.prev_size_bytes.map(|prev| {
-            if prev == 0 {
-                return 100.0;
-            }
-            ((self.size_bytes as f64 - prev as f64) / prev as f64 * 100.0) as f32
-        })
     }
 }
 
-/// Indicates how a node's size changed relative to a previous scan.
+/// A completed scan snapshot
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScanSnapshot {
+    pub id: Uuid,
+    pub drive_id: String,
+    pub label: String,
+    pub scanned_at: DateTime<Utc>,
+    pub total_bytes: u64,
+    pub total_files: u64,
+    pub total_folders: u64,
+    pub root: Option<TreeNode>,
+}
+
+impl ScanSnapshot {
+    pub fn new(drive_id: impl Into<String>, label: impl Into<String>) -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            drive_id: drive_id.into(),
+            label: label.into(),
+            scanned_at: Utc::now(),
+            total_bytes: 0,
+            total_files: 0,
+            total_folders: 0,
+            root: None,
+        }
+    }
+}
+
+/// Describes how a size has changed between two scans
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SizeChange {
-    New,
+    /// Size increased significantly
     Increased,
+    /// Size decreased significantly
     Decreased,
+    /// Size is roughly the same
     Unchanged,
-}
-
-/// Which scan is selected as Base vs New for comparison.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ScanRole {
-    Base,
+    /// Entry is new (no previous scan)
     New,
+    /// Entry was deleted (not in current scan)
+    Deleted,
 }
 
-/// Application-level state shared across views.
+impl SizeChange {
+    pub fn from_delta(current: u64, previous: u64) -> Self {
+        if previous == 0 {
+            return SizeChange::New;
+        }
+        if current == 0 {
+            return SizeChange::Deleted;
+        }
+        let ratio = current as f64 / previous as f64;
+        if ratio > 1.05 {
+            SizeChange::Increased
+        } else if ratio < 0.95 {
+            SizeChange::Decreased
+        } else {
+            SizeChange::Unchanged
+        }
+    }
+}
+
+/// Application-level state shared across views
 #[derive(Debug, Clone)]
 pub struct AppState {
-    pub drives: Vec<DriveInfo>,
-    pub selected_drive: Option<Uuid>,
-    pub scan_history: Vec<ScanEntry>,
+    pub available_drives: Vec<DriveInfo>,
+    pub selected_drive: Option<String>,
+    pub scan_history: Vec<ScanSnapshot>,
     pub base_scan_id: Option<Uuid>,
     pub new_scan_id: Option<Uuid>,
-    pub tree_root: Option<TreeNode>,
     pub is_scanning: bool,
+    pub scan_progress: f32,
 }
 
 impl Default for AppState {
     fn default() -> Self {
         Self {
-            drives: Vec::new(),
+            available_drives: Vec::new(),
             selected_drive: None,
             scan_history: Vec::new(),
             base_scan_id: None,
             new_scan_id: None,
-            tree_root: None,
             is_scanning: false,
+            scan_progress: 0.0,
         }
     }
 }
 
-impl AppState {
-    pub fn new() -> Self {
-        Self::default()
-    }
+/// Format bytes into a human-readable string
+pub fn format_bytes(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+    const TB: u64 = GB * 1024;
 
-    pub fn with_mock_data() -> Self {
-        use chrono::TimeZone;
-
-        let drive_id = Uuid::new_v4();
-        let drives = vec![
-            DriveInfo {
-                id: drive_id,
-                path: "/".to_string(),
-                label: Some("Macintosh HD".to_string()),
-                total_bytes: 500_000_000_000,
-                free_bytes: 120_000_000_000,
-                used_bytes: 380_000_000_000,
-            },
-            DriveInfo {
-                id: Uuid::new_v4(),
-                path: "/Volumes/Data".to_string(),
-                label: None,
-                total_bytes: 2_000_000_000_000,
-                free_bytes: 800_000_000_000,
-                used_bytes: 1_200_000_000_000,
-            },
-        ];
-
-        let scan1 = ScanEntry {
-            id: Uuid::new_v4(),
-            drive_id,
-            label: "Scan 2024-01-15".to_string(),
-            scanned_at: Utc.with_ymd_and_hms(2024, 1, 15, 10, 0, 0).unwrap(),
-            total_bytes: 370_000_000_000,
-            file_count: 142_000,
-            folder_count: 8_500,
-        };
-        let scan2 = ScanEntry {
-            id: Uuid::new_v4(),
-            drive_id,
-            label: "Scan 2024-06-01".to_string(),
-            scanned_at: Utc.with_ymd_and_hms(2024, 6, 1, 14, 30, 0).unwrap(),
-            total_bytes: 380_000_000_000,
-            file_count: 148_000,
-            folder_count: 8_900,
-        };
-
-        let base_id = scan1.id;
-        let new_id = scan2.id;
-
-        Self {
-            drives,
-            selected_drive: Some(drive_id),
-            scan_history: vec![scan1, scan2],
-            base_scan_id: Some(base_id),
-            new_scan_id: Some(new_id),
-            tree_root: Some(mock_tree_root()),
-            is_scanning: false,
-        }
+    if bytes >= TB {
+        format!("{:.2} TB", bytes as f64 / TB as f64)
+    } else if bytes >= GB {
+        format!("{:.2} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.0} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{} B", bytes)
     }
 }
 
-fn mock_tree_root() -> TreeNode {
-    TreeNode {
-        id: Uuid::new_v4(),
-        name: "/".to_string(),
-        path: "/".to_string(),
-        depth: 0,
-        is_dir: true,
-        size_bytes: 380_000_000_000,
-        prev_size_bytes: Some(370_000_000_000),
-        file_count: 148_000,
-        folder_count: 8_900,
-        modified_at: None,
-        is_expanded: true,
-        children: vec![
-            TreeNode {
-                id: Uuid::new_v4(),
-                name: "Users".to_string(),
-                path: "/Users".to_string(),
-                depth: 1,
-                is_dir: true,
-                size_bytes: 200_000_000_000,
-                prev_size_bytes: Some(190_000_000_000),
-                file_count: 100_000,
-                folder_count: 5_000,
-                modified_at: None,
-                is_expanded: false,
-                children: vec![],
-            },
-            TreeNode {
-                id: Uuid::new_v4(),
-                name: "Applications".to_string(),
-                path: "/Applications".to_string(),
-                depth: 1,
-                is_dir: true,
-                size_bytes: 80_000_000_000,
-                prev_size_bytes: Some(80_000_000_000),
-                file_count: 20_000,
-                folder_count: 2_000,
-                modified_at: None,
-                is_expanded: false,
-                children: vec![],
-            },
-            TreeNode {
-                id: Uuid::new_v4(),
-                name: "System".to_string(),
-                path: "/System".to_string(),
-                depth: 1,
-                is_dir: true,
-                size_bytes: 60_000_000_000,
-                prev_size_bytes: Some(62_000_000_000),
-                file_count: 25_000,
-                folder_count: 1_800,
-                modified_at: None,
-                is_expanded: false,
-                children: vec![],
-            },
-            TreeNode {
-                id: Uuid::new_v4(),
-                name: "Library".to_string(),
-                path: "/Library".to_string(),
-                depth: 1,
-                is_dir: true,
-                size_bytes: 40_000_000_000,
-                prev_size_bytes: Some(38_000_000_000),
-                file_count: 3_000,
-                folder_count: 100,
-                modified_at: None,
-                is_expanded: false,
-                children: vec![],
-            },
-        ],
+/// Format a percentage value
+pub fn format_percent(value: f64) -> String {
+    format!("{:.1}%", value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_bytes() {
+        assert_eq!(format_bytes(0), "0 B");
+        assert_eq!(format_bytes(512), "512 B");
+        assert_eq!(format_bytes(1024), "1 KB");
+        assert_eq!(format_bytes(1536), "2 KB");
+        assert_eq!(format_bytes(1_048_576), "1.0 MB");
+        assert_eq!(format_bytes(1_073_741_824), "1.00 GB");
+    }
+
+    #[test]
+    fn test_drive_display_label_with_volume() {
+        let drive = DriveInfo {
+            id: "C:".to_string(),
+            mount_point: "C:".to_string(),
+            volume_label: Some("System".to_string()),
+            total_bytes: 500 * 1024 * 1024 * 1024,
+            available_bytes: 100 * 1024 * 1024 * 1024,
+            file_system: Some("NTFS".to_string()),
+        };
+        let label = drive.display_label();
+        assert!(label.contains("System"));
+        assert!(label.contains("C:"));
+    }
+
+    #[test]
+    fn test_drive_display_label_without_volume() {
+        let drive = DriveInfo {
+            id: "/".to_string(),
+            mount_point: "/".to_string(),
+            volume_label: None,
+            total_bytes: 256 * 1024 * 1024 * 1024,
+            available_bytes: 50 * 1024 * 1024 * 1024,
+            file_system: Some("ext4".to_string()),
+        };
+        let label = drive.display_label();
+        assert!(label.contains("/"));
+        assert!(!label.contains("None"));
+    }
+
+    #[test]
+    fn test_size_change() {
+        assert_eq!(SizeChange::from_delta(0, 100), SizeChange::Deleted);
+        assert_eq!(SizeChange::from_delta(100, 0), SizeChange::New);
+        assert_eq!(SizeChange::from_delta(200, 100), SizeChange::Increased);
+        assert_eq!(SizeChange::from_delta(50, 100), SizeChange::Decreased);
+        assert_eq!(SizeChange::from_delta(100, 100), SizeChange::Unchanged);
     }
 }
