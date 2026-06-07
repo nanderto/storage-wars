@@ -1,13 +1,13 @@
 # Storage Wars
 
-A desktop application built with **Rust** and **GPUI** (the GPU-accelerated UI framework from Zed).
+A desktop application for managing storage units, built with Rust and [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui).
 
-## Requirements
+## Prerequisites
 
 | Tool | Version |
 |------|---------|
 | Rust | stable (see `rust-toolchain.toml`) |
-| macOS | 12+ *or* Linux (X11/Wayland) *or* Windows 10+ |
+| macOS | 12 Monterey+ **or** Linux with X11/Wayland |
 
 ### macOS additional dependencies
 

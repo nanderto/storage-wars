@@ -1,48 +1,91 @@
-use gpui::{Hsla, Rgba};
+//! Application-wide theme tokens.
+//!
+//! Provides a [`StorageWarsTheme`] struct that holds all colour values
+//! used throughout the UI.  Currently only a dark variant is implemented.
 
-/// Dark theme palette for Storage Wars.
+use gpui::Hsla;
+
+/// All colour tokens for the Storage Wars UI.
 #[derive(Debug, Clone, Copy)]
 pub struct StorageWarsTheme {
-    /// Main window background.
+    /// Main window / panel background.
     pub background: Hsla,
-    /// Primary foreground / text colour.
-    pub foreground: Hsla,
-    /// Title-bar background (slightly lighter than window bg).
-    pub title_bar_background: Hsla,
-    /// Title-bar text / icon colour.
-    pub title_bar_foreground: Hsla,
-    /// Accent colour used for interactive elements.
-    pub accent: Hsla,
-    /// Subtle border colour.
-    pub border: Hsla,
-    /// Surface colour for cards / panels.
+    /// Slightly elevated surface (cards, sidebars).
     pub surface: Hsla,
-    /// Muted text colour.
-    pub muted: Hsla,
+    /// Primary interactive accent colour.
+    pub accent: Hsla,
+    /// Default body text.
+    pub text: Hsla,
+    /// Muted / secondary text.
+    pub text_muted: Hsla,
+    /// Subtle border / divider colour.
+    pub border: Hsla,
+    /// Destructive action colour.
+    pub danger: Hsla,
+    /// Success / positive colour.
+    pub success: Hsla,
 }
 
 impl StorageWarsTheme {
-    /// Construct the canonical dark theme.
+    /// Returns the canonical dark theme.
     pub fn dark() -> Self {
         Self {
-            background: rgba_to_hsla(0x0d0d0dff),
-            foreground: rgba_to_hsla(0xe8e8e8ff),
-            title_bar_background: rgba_to_hsla(0x141414ff),
-            title_bar_foreground: rgba_to_hsla(0xd0d0d0ff),
-            accent: rgba_to_hsla(0x4a9effff),
-            border: rgba_to_hsla(0x2a2a2aff),
-            surface: rgba_to_hsla(0x1a1a1aff),
-            muted: rgba_to_hsla(0x6b6b6bff),
+            // #0f1117 — near-black background
+            background: Hsla {
+                h: 228.0 / 360.0,
+                s: 0.14,
+                l: 0.08,
+                a: 1.0,
+            },
+            // #1a1d27 — elevated surface
+            surface: Hsla {
+                h: 228.0 / 360.0,
+                s: 0.20,
+                l: 0.13,
+                a: 1.0,
+            },
+            // #6c8ef5 — blue accent
+            accent: Hsla {
+                h: 228.0 / 360.0,
+                s: 0.85,
+                l: 0.69,
+                a: 1.0,
+            },
+            // #e2e4f0 — primary text
+            text: Hsla {
+                h: 228.0 / 360.0,
+                s: 0.30,
+                l: 0.91,
+                a: 1.0,
+            },
+            // #8b8fa8 — muted text
+            text_muted: Hsla {
+                h: 228.0 / 360.0,
+                s: 0.12,
+                l: 0.60,
+                a: 1.0,
+            },
+            // #2a2d3e — subtle border
+            border: Hsla {
+                h: 228.0 / 360.0,
+                s: 0.20,
+                l: 0.21,
+                a: 1.0,
+            },
+            // #f56c6c — danger red
+            danger: Hsla {
+                h: 0.0 / 360.0,
+                s: 0.85,
+                l: 0.69,
+                a: 1.0,
+            },
+            // #67c23a — success green
+            success: Hsla {
+                h: 100.0 / 360.0,
+                s: 0.56,
+                l: 0.49,
+                a: 1.0,
+            },
         }
     }
-}
-
-/// Convert a packed `0xRRGGBBAA` hex literal into an [`Hsla`] colour.
-fn rgba_to_hsla(packed: u32) -> Hsla {
-    let r = ((packed >> 24) & 0xff) as f32 / 255.0;
-    let g = ((packed >> 16) & 0xff) as f32 / 255.0;
-    let b = ((packed >> 8) & 0xff) as f32 / 255.0;
-    let a = (packed & 0xff) as f32 / 255.0;
-
-    Rgba { r, g, b, a }.into()
 }
