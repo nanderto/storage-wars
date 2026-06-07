@@ -1,14 +1,16 @@
-//! Tree manipulation utilities.
+//! Tree manipulation utilities for filesystem node hierarchies.
 //!
-//! Provides functions for building, flattening, and transforming filesystem
-//! tree structures backed by the `models` crate types.
+//! Provides operations such as rebuilding an `FsNode` tree from flat `DbNode`
+//! records, flattening a tree into `UiNode` lists, recalculating sizes,
+//! inserting children, and baseline map operations.
 
-/// Functions for flattening a nested `FsNode` tree into a flat `Vec<UiNode>`.
+/// Flatten a nested `FsNode` tree into a `Vec<UiNode>` respecting expanded paths,
+/// with `scan_progress` computed as a fraction of the largest sibling.
 pub mod flatten {
     // TODO: implement flatten_tree
 }
 
-/// Functions for rebuilding an `FsNode` hierarchy from a flat `Vec<DbNode>`.
+/// Rebuild an `FsNode` hierarchy from a flat `Vec<DbNode>` using `parent_id` links.
 pub mod rebuild {
     // TODO: implement build_fs_tree
 }

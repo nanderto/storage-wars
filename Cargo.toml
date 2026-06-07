@@ -1,6 +1,3 @@
 [workspace]
+members = ["crates/*"]
 resolver = "2"
-members = [
-    "crates/models",
-    "crates/tree_ops",
-]
