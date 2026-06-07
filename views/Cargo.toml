@@ -2,12 +2,16 @@
 name = "views"
 version = "0.1.0"
 edition = "2021"
-description = "GPUI view components for disk space analyzer desktop application"
+description = "GPUI view components for disk space analyzer"
 authors = []
 
 [[bin]]
 name = "views"
 path = "src/main.rs"
+
+[lib]
+name = "views"
+path = "src/lib.rs"
 
 [dependencies]
 gpui = { git = "https://github.com/zed-industries/zed", rev = "main" }
@@ -16,19 +20,15 @@ log = "0.4"
 env_logger = "0.11"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-bytesize = "1.3"
 chrono = { version = "0.4", features = ["serde"] }
+bytesize = "1.3"
 uuid = { version = "1.8", features = ["v4", "serde"] }
 parking_lot = "0.12"
 smallvec = "1.13"
-collections = { git = "https://github.com/zed-industries/zed", rev = "main" }
-theme = { git = "https://github.com/zed-industries/zed", rev = "main" }
-ui = { git = "https://github.com/zed-industries/zed", rev = "main" }
+futures = "0.3"
 
 [dev-dependencies]
 pretty_assertions = "1.4"
-
-[build-dependencies]
 
 [features]
 default = []

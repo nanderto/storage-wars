@@ -1,330 +1,224 @@
+//! [`TreeView`] — hierarchical file-system tree with column headers,
+//! chevrons, icons, 16 px/depth indentation, and SizeChange progress bars.
+
 use gpui::{
-    div, px, AppContext, Div, EventEmitter, FocusHandle, FocusableView, IntoElement,
-    ParentElement, Render, SharedString, Styled, View, ViewContext, VisualContext, WindowContext,
+    div, px, AnyElement, AppContext, Context, Element, Entity, EventEmitter, FocusHandle,
+    Focusable, InteractiveElement, IntoElement, ParentElement, Render, SharedString, Styled,
+    Window,
 };
-use std::collections::HashSet;
-use uuid::Uuid;
 
-use crate::types::{SizeChange, TreeNode, format_bytes, format_percent};
-use crate::ui_helpers::{colors, font_size, spacing, progress_bar};
+use crate::theme;
+use crate::types::{FileNode, SizeChange, TreeColumn};
 
-/// Column definitions for the tree view
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TreeColumn {
-    Name,
-    PercentParent,
-    Size,
-    PrevSize,
-    PercentPrev,
-    Files,
-    Folders,
-    Modified,
-}
+// ---------------------------------------------------------------------------
+// Events
+// ---------------------------------------------------------------------------
 
-impl TreeColumn {
-    pub fn label(&self) -> &'static str {
-        match self {
-            TreeColumn::Name => "Name",
-            TreeColumn::PercentParent => "% Parent",
-            TreeColumn::Size => "Size",
-            TreeColumn::PrevSize => "Prev Size",
-            TreeColumn::PercentPrev => "% Prev",
-            TreeColumn::Files => "Files",
-            TreeColumn::Folders => "Folders",
-            TreeColumn::Modified => "Modified",
-        }
-    }
-
-    pub fn width(&self) -> f32 {
-        match self {
-            TreeColumn::Name => 300.0,
-            TreeColumn::PercentParent => 100.0,
-            TreeColumn::Size => 90.0,
-            TreeColumn::PrevSize => 90.0,
-            TreeColumn::PercentPrev => 80.0,
-            TreeColumn::Files => 70.0,
-            TreeColumn::Folders => 70.0,
-            TreeColumn::Modified => 140.0,
-        }
-    }
-}
-
-/// A flat row representation for rendering
-#[derive(Debug, Clone)]
-pub struct TreeRow {
-    pub node_id: Uuid,
-    pub name: String,
-    pub path: String,
-    pub depth: usize,
-    pub is_directory: bool,
-    pub is_expanded: bool,
-    pub has_children: bool,
-    pub size_bytes: u64,
-    pub prev_size_bytes: Option<u64>,
-    pub parent_size_bytes: Option<u64>,
-    pub file_count: u64,
-    pub folder_count: u64,
-    pub modified_at: Option<chrono::DateTime<chrono::Utc>>,
-    pub size_change: SizeChange,
-}
-
-impl TreeRow {
-    pub fn percent_of_parent(&self) -> Option<f64> {
-        self.parent_size_bytes.and_then(|parent| {
-            if parent == 0 {
-                None
-            } else {
-                Some((self.size_bytes as f64 / parent as f64) * 100.0)
-            }
-        })
-    }
-
-    pub fn percent_of_prev(&self) -> Option<f64> {
-        self.prev_size_bytes.and_then(|prev| {
-            if prev == 0 {
-                None
-            } else {
-                Some((self.size_bytes as f64 / prev as f64) * 100.0)
-            }
-        })
-    }
-}
-
-/// Events emitted by TreeView
-#[derive(Debug, Clone)]
 pub enum TreeViewEvent {
-    NodeToggled(Uuid),
-    NodeSelected(Uuid),
+    NodeSelected(Vec<String>),
+    NodeToggled(Vec<String>),
 }
 
-/// Hierarchical file tree view with columns
+impl EventEmitter<TreeViewEvent> for TreeView {}
+
+// ---------------------------------------------------------------------------
+// Model
+// ---------------------------------------------------------------------------
+
 pub struct TreeView {
-    rows: Vec<TreeRow>,
-    selected_id: Option<Uuid>,
-    expanded_ids: HashSet<Uuid>,
+    roots: Vec<FileNode>,
+    selected_path: Option<Vec<String>>,
     focus_handle: FocusHandle,
-    scroll_offset: f32,
 }
 
 impl TreeView {
-    pub fn new(cx: &mut ViewContext<Self>) -> Self {
+    pub fn new(cx: &mut Context<Self>) -> Self {
         Self {
-            rows: Vec::new(),
-            selected_id: None,
-            expanded_ids: HashSet::new(),
+            roots: Vec::new(),
+            selected_path: None,
             focus_handle: cx.focus_handle(),
-            scroll_offset: 0.0,
         }
     }
 
-    pub fn set_rows(&mut self, rows: Vec<TreeRow>, cx: &mut ViewContext<Self>) {
-        self.rows = rows;
-        cx.notify();
+    pub fn set_roots(&mut self, roots: Vec<FileNode>) {
+        self.roots = roots;
     }
 
-    pub fn clear(&mut self, cx: &mut ViewContext<Self>) {
-        self.rows.clear();
-        self.selected_id = None;
-        self.expanded_ids.clear();
-        cx.notify();
-    }
+    // -----------------------------------------------------------------------
+    // Rendering helpers
+    // -----------------------------------------------------------------------
 
-    fn row_height() -> f32 {
-        28.0
-    }
-
-    fn render_header(&self) -> Div {
-        let columns = [
-            TreeColumn::Name,
-            TreeColumn::PercentParent,
-            TreeColumn::Size,
-            TreeColumn::PrevSize,
-            TreeColumn::PercentPrev,
-            TreeColumn::Files,
-            TreeColumn::Folders,
-            TreeColumn::Modified,
-        ];
-
-        let mut header = div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .w_full()
-            .h(px(28.0))
-            .bg(colors::surface())
-            .border_b_1()
-            .border_color(colors::border())
-            .px(spacing::sm());
-
-        for col in &columns {
-            header = header.child(
+    fn render_header(&self) -> impl IntoElement {
+        let headers: Vec<AnyElement> = TreeColumn::ALL
+            .iter()
+            .map(|col| {
                 div()
-                    .w(px(col.width()))
+                    .w(px(col.default_width()))
+                    .px(px(theme::SPACING_XS))
                     .flex_shrink_0()
-                    .text_color(colors::subtext())
-                    .text_size(font_size::xs())
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .child(col.label()),
-            );
-        }
-
-        header
-    }
-
-    fn render_row(&self, row: &TreeRow, cx: &mut ViewContext<Self>) -> Div {
-        let is_selected = self.selected_id == Some(row.node_id);
-        let indent = row.depth as f32 * spacing::tree_indent().0;
-        let node_id = row.node_id;
-
-        // Name cell with chevron and icon
-        let chevron = if row.is_directory && row.has_children {
-            if row.is_expanded { "▾ " } else { "▸ " }
-        } else if row.is_directory {
-            "  "
-        } else {
-            "  "
-        };
-
-        let icon = if row.is_directory { "📁" } else { "📄" };
-
-        let name_cell = div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .w(px(TreeColumn::Name.width()))
-            .flex_shrink_0()
-            .pl(px(indent))
-            .child(
-                div()
-                    .text_color(colors::accent())
-                    .text_size(font_size::sm())
-                    .cursor_pointer()
-                    .on_mouse_down(
-                        gpui::MouseButton::Left,
-                        cx.listener(move |this, _, cx| {
-                            cx.emit(TreeViewEvent::NodeToggled(node_id));
-                        }),
-                    )
-                    .child(chevron),
-            )
-            .child(
-                div()
-                    .text_size(font_size::sm())
-                    .mr(spacing::xs())
-                    .child(icon),
-            )
-            .child(
-                div()
-                    .text_color(colors::text())
-                    .text_size(font_size::sm())
-                    .overflow_hidden()
-                    .child(SharedString::from(row.name.clone())),
-            );
-
-        // Percent of parent cell with progress bar
-        let pct_parent_cell = div()
-            .w(px(TreeColumn::PercentParent.width()))
-            .flex_shrink_0()
-            .flex()
-            .flex_col()
-            .justify_center()
-            .gap(px(2.0))
-            .child(match row.percent_of_parent() {
-                Some(pct) => div()
-                    .text_color(colors::for_size_change(row.size_change))
-                    .text_size(font_size::xs())
-                    .child(SharedString::from(format_percent(pct))),
-                None => div()
-                    .text_color(colors::muted())
-                    .text_size(font_size::xs())
-                    .child("—"),
+                    .text_color(theme::TEXT_SECONDARY)
+                    .text_size(px(theme::FONT_SIZE_SM))
+                    .child(col.header())
+                    .into_any_element()
             })
-            .child(progress_bar(
-                row.percent_of_parent().map(|p| (p / 100.0) as f32).unwrap_or(0.0),
-                row.size_change,
-            ));
-
-        // Size cell
-        let size_cell = div()
-            .w(px(TreeColumn::Size.width()))
-            .flex_shrink_0()
-            .text_color(colors::text())
-            .text_size(font_size::sm())
-            .child(SharedString::from(format_bytes(row.size_bytes)));
-
-        // Prev size cell
-        let prev_size_cell = div()
-            .w(px(TreeColumn::PrevSize.width()))
-            .flex_shrink_0()
-            .text_color(colors::subtext())
-            .text_size(font_size::sm())
-            .child(match row.prev_size_bytes {
-                Some(prev) => SharedString::from(format_bytes(prev)),
-                None => "—".into(),
-            });
-
-        // Percent prev cell
-        let pct_prev_cell = div()
-            .w(px(TreeColumn::PercentPrev.width()))
-            .flex_shrink_0()
-            .text_color(colors::for_size_change(row.size_change))
-            .text_size(font_size::sm())
-            .child(match row.percent_of_prev() {
-                Some(pct) => SharedString::from(format_percent(pct)),
-                None => "—".into(),
-            });
-
-        // Files cell
-        let files_cell = div()
-            .w(px(TreeColumn::Files.width()))
-            .flex_shrink_0()
-            .text_color(colors::subtext())
-            .text_size(font_size::sm())
-            .child(SharedString::from(row.file_count.to_string()));
-
-        // Folders cell
-        let folders_cell = div()
-            .w(px(TreeColumn::Folders.width()))
-            .flex_shrink_0()
-            .text_color(colors::subtext())
-            .text_size(font_size::sm())
-            .child(SharedString::from(row.folder_count.to_string()));
-
-        // Modified cell
-        let modified_cell = div()
-            .w(px(TreeColumn::Modified.width()))
-            .flex_shrink_0()
-            .text_color(colors::muted())
-            .text_size(font_size::xs())
-            .child(match &row.modified_at {
-                Some(dt) => SharedString::from(dt.format("%Y-%m-%d %H:%M").to_string()),
-                None => "—".into(),
-            });
+            .collect();
 
         div()
             .flex()
             .flex_row()
             .items_center()
-            .w_full()
-            .h(px(Self::row_height()))
-            .px(spacing::sm())
-            .bg(if is_selected {
-                colors::overlay()
-            } else {
-                colors::background()
-            })
-            .hover(|s| s.bg(colors::surface()))
-            .cursor_pointer()
+            .h(px(theme::TREE_HEADER_HEIGHT))
+            .bg(theme::SURFACE)
             .border_b_1()
-            .border_color(colors::border())
-            .on_mouse_down(
-                gpui::MouseButton::Left,
-                cx.listener(move |this, _, cx| {
-                    this.selected_id = Some(node_id);
-                    cx.emit(TreeViewEvent::NodeSelected(node_id));
-                    cx.notify();
-                }),
+            .border_color(theme::BORDER)
+            .children(headers)
+    }
+
+    fn render_node(
+        &self,
+        node: &FileNode,
+        depth: usize,
+        path: Vec<String>,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let mut elements: Vec<AnyElement> = Vec::new();
+
+        let indent = depth as f32 * theme::TREE_INDENT_PX;
+        let is_selected = self.selected_path.as_deref() == Some(&path);
+        let node_path = path.clone();
+        let toggle_path = path.clone();
+
+        let bg = if is_selected {
+            theme::TREE_ROW_SELECTED
+        } else {
+            theme::BACKGROUND
+        };
+
+        // Chevron / icon
+        let chevron: &'static str = if node.is_dir {
+            if node.expanded { "▼" } else { "▶" }
+        } else {
+            " "
+        };
+
+        let icon: &'static str = if node.is_dir { "📁" } else { "📄" };
+
+        // Name cell with indentation + chevron + icon
+        let name_cell = div()
+            .w(px(TreeColumn::Name.default_width()))
+            .flex_shrink_0()
+            .flex()
+            .flex_row()
+            .items_center()
+            .pl(px(indent + theme::SPACING_XS))
+            .gap(px(4.0))
+            .child(
+                div()
+                    .text_color(theme::TEXT_SECONDARY)
+                    .text_size(px(theme::FONT_SIZE_SM))
+                    .w(px(12.0))
+                    .child(chevron),
             )
+            .child(
+                div()
+                    .text_size(px(theme::FONT_SIZE_SM))
+                    .child(icon),
+            )
+            .child(
+                div()
+                    .text_color(theme::TEXT_PRIMARY)
+                    .text_size(px(theme::FONT_SIZE_MD))
+                    .overflow_hidden()
+                    .child(SharedString::from(node.name.clone())),
+            );
+
+        // % Parent cell with progress bar
+        let pct_parent = (node.parent_fraction * 100.0) as u32;
+        let bar_color = theme::size_change_color(node.size_change);
+
+        let pct_parent_cell = div()
+            .w(px(TreeColumn::PercentParent.default_width()))
+            .flex_shrink_0()
+            .px(px(theme::SPACING_XS))
+            .flex()
+            .flex_col()
+            .justify_center()
+            .gap(px(2.0))
+            .child(
+                div()
+                    .text_color(theme::TEXT_SECONDARY)
+                    .text_size(px(theme::FONT_SIZE_SM))
+                    .child(format!("{pct_parent}%")),
+            )
+            .child(
+                // Progress bar track
+                div()
+                    .w_full()
+                    .h(px(3.0))
+                    .bg(theme::BORDER)
+                    .rounded(px(2.0))
+                    .child(
+                        div()
+                            .w(gpui::relative(node.parent_fraction))
+                            .h_full()
+                            .bg(bar_color)
+                            .rounded(px(2.0)),
+                    ),
+            );
+
+        // Size cell
+        let size_label: SharedString =
+            bytesize::ByteSize(node.size_bytes).to_string_as(true).into();
+        let size_cell = self.simple_cell(TreeColumn::Size, size_label);
+
+        // Prev size cell
+        let prev_size_label: SharedString = node
+            .prev_size_bytes
+            .map(|b| bytesize::ByteSize(b).to_string_as(true))
+            .unwrap_or_default()
+            .into();
+        let prev_size_cell = self.simple_cell(TreeColumn::PrevSize, prev_size_label);
+
+        // % Prev cell
+        let pct_prev_label: SharedString = node
+            .percent_change()
+            .map(|p| format!("{:+.1}%", p))
+            .unwrap_or_default()
+            .into();
+        let pct_prev_cell = self.simple_cell(TreeColumn::PercentPrev, pct_prev_label);
+
+        // Files cell
+        let files_cell =
+            self.simple_cell(TreeColumn::Files, SharedString::from(node.file_count.to_string()));
+
+        // Folders cell
+        let folders_cell = self.simple_cell(
+            TreeColumn::Folders,
+            SharedString::from(node.folder_count.to_string()),
+        );
+
+        // Modified cell
+        let modified_label: SharedString = node
+            .modified_at
+            .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+            .unwrap_or_default()
+            .into();
+        let modified_cell = self.simple_cell(TreeColumn::Modified, modified_label);
+
+        let row = div()
+            .id(("tree-row", node.id.as_u128() as usize))
+            .flex()
+            .flex_row()
+            .items_center()
+            .h(px(theme::TREE_ROW_HEIGHT))
+            .bg(bg)
+            .hover(|s| s.bg(theme::TREE_ROW_HOVER))
+            .cursor_pointer()
+            .on_click(cx.listener(move |this, _ev, _window, cx| {
+                this.selected_path = Some(node_path.clone());
+                cx.emit(TreeViewEvent::NodeSelected(node_path.clone()));
+                cx.notify();
+            }))
             .child(name_cell)
             .child(pct_parent_cell)
             .child(size_cell)
@@ -333,80 +227,77 @@ impl TreeView {
             .child(files_cell)
             .child(folders_cell)
             .child(modified_cell)
+            .into_any_element();
+
+        elements.push(row);
+
+        // Recurse into children if expanded
+        if node.is_dir && node.expanded {
+            for child in &node.children {
+                let mut child_path = path.clone();
+                child_path.push(child.name.clone());
+                let child_elements = self.render_node(child, depth + 1, child_path, cx);
+                elements.extend(child_elements);
+            }
+        }
+
+        elements
     }
 
-    fn render_empty_state(&self) -> Div {
+    fn simple_cell(&self, col: TreeColumn, label: SharedString) -> AnyElement {
         div()
-            .flex()
-            .flex_1()
-            .items_center()
-            .justify_center()
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .gap(spacing::sm())
-                    .child(
-                        div()
-                            .text_size(px(32.0))
-                            .child("🔍"),
-                    )
-                    .child(
-                        div()
-                            .text_color(colors::muted())
-                            .text_size(font_size::md())
-                            .child("No scan data available"),
-                    )
-                    .child(
-                        div()
-                            .text_color(colors::muted())
-                            .text_size(font_size::sm())
-                            .child("Select a drive and start a scan"),
-                    ),
-            )
+            .w(px(col.default_width()))
+            .flex_shrink_0()
+            .px(px(theme::SPACING_XS))
+            .text_color(theme::TEXT_SECONDARY)
+            .text_size(px(theme::FONT_SIZE_MD))
+            .overflow_hidden()
+            .child(label)
+            .into_any_element()
     }
 }
 
-impl EventEmitter<TreeViewEvent> for TreeView {}
+// ---------------------------------------------------------------------------
+// Focusable
+// ---------------------------------------------------------------------------
 
-impl FocusableView for TreeView {
+impl Focusable for TreeView {
     fn focus_handle(&self, _cx: &AppContext) -> FocusHandle {
         self.focus_handle.clone()
     }
 }
 
-impl Render for TreeView {
-    fn render(&mut self, cx: &mut ViewContext<Self>) -> impl IntoElement {
-        let rows = self.rows.clone();
+// ---------------------------------------------------------------------------
+// Render
+// ---------------------------------------------------------------------------
 
-        let mut container = div()
+impl Render for TreeView {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let header = self.render_header();
+
+        // Collect all visible rows
+        let rows: Vec<AnyElement> = self
+            .roots
+            .iter()
+            .flat_map(|root| {
+                let path = vec![root.name.clone()];
+                self.render_node(root, 0, path, cx)
+            })
+            .collect();
+
+        div()
             .flex()
             .flex_col()
             .w_full()
-            .flex_1()
-            .overflow_hidden()
-            .track_focus(&self.focus_handle);
-
-        container = container.child(self.render_header());
-
-        if rows.is_empty() {
-            container = container.child(self.render_empty_state());
-        } else {
-            let mut scroll_area = div()
-                .flex()
-                .flex_col()
-                .w_full()
-                .flex_1()
-                .overflow_y_scroll();
-
-            for row in &rows {
-                scroll_area = scroll_area.child(self.render_row(row, cx));
-            }
-
-            container = container.child(scroll_area);
-        }
-
-        container
+            .h_full()
+            .bg(theme::BACKGROUND)
+            .track_focus(&self.focus_handle)
+            .child(header)
+            .child(
+                div()
+                    .flex_1()
+                    .overflow_y_scroll()
+                    .children(rows),
+            )
     }
 }

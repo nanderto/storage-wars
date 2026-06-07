@@ -1,153 +1,69 @@
-use gpui::{hsla, rgba, Hsla, Rgba};
+//! Design tokens — colours, spacing, and typography used across all views.
 
-/// Application color palette.
-pub struct Theme {
-    pub background: Hsla,
-    pub surface: Hsla,
-    pub surface_elevated: Hsla,
-    pub border: Hsla,
-    pub border_focused: Hsla,
+use gpui::{Hsla, Rgba, hsla, rgb};
 
-    pub text_primary: Hsla,
-    pub text_secondary: Hsla,
-    pub text_muted: Hsla,
-    pub text_on_accent: Hsla,
+// ---------------------------------------------------------------------------
+// Palette
+// ---------------------------------------------------------------------------
 
-    pub accent: Hsla,
-    pub accent_hover: Hsla,
-    pub accent_pressed: Hsla,
+pub const BACKGROUND: Hsla = hsla(220.0 / 360.0, 0.13, 0.11, 1.0);
+pub const SURFACE: Hsla = hsla(220.0 / 360.0, 0.12, 0.15, 1.0);
+pub const SURFACE_RAISED: Hsla = hsla(220.0 / 360.0, 0.11, 0.18, 1.0);
+pub const BORDER: Hsla = hsla(220.0 / 360.0, 0.10, 0.25, 1.0);
 
-    pub selection_bg: Hsla,
-    pub selection_text: Hsla,
+pub const TEXT_PRIMARY: Hsla = hsla(0.0, 0.0, 0.92, 1.0);
+pub const TEXT_SECONDARY: Hsla = hsla(0.0, 0.0, 0.60, 1.0);
+pub const TEXT_MUTED: Hsla = hsla(0.0, 0.0, 0.40, 1.0);
 
-    pub size_increased: Hsla,
-    pub size_decreased: Hsla,
-    pub size_new: Hsla,
-    pub size_unchanged: Hsla,
+pub const ACCENT: Hsla = hsla(210.0 / 360.0, 0.80, 0.55, 1.0);
+pub const ACCENT_HOVER: Hsla = hsla(210.0 / 360.0, 0.80, 0.65, 1.0);
 
-    pub progress_track: Hsla,
-    pub progress_fill: Hsla,
+// SizeChange colours
+pub const COLOR_NEW: Hsla = hsla(142.0 / 360.0, 0.69, 0.45, 1.0);
+pub const COLOR_DELETED: Hsla = hsla(0.0 / 360.0, 0.65, 0.50, 1.0);
+pub const COLOR_GREW: Hsla = hsla(25.0 / 360.0, 0.90, 0.55, 1.0);
+pub const COLOR_SHRANK: Hsla = hsla(195.0 / 360.0, 0.70, 0.50, 1.0);
+pub const COLOR_UNCHANGED: Hsla = hsla(0.0, 0.0, 0.45, 1.0);
 
-    pub title_bar_bg: Hsla,
-    pub title_bar_text: Hsla,
+// Title bar
+pub const TITLE_BAR_BG: Hsla = hsla(220.0 / 360.0, 0.14, 0.09, 1.0);
+pub const TITLE_BAR_TEXT: Hsla = hsla(0.0, 0.0, 0.80, 1.0);
 
-    pub button_bg: Hsla,
-    pub button_bg_hover: Hsla,
-    pub button_bg_pressed: Hsla,
-    pub button_text: Hsla,
-    pub button_border: Hsla,
+// Scan history panel
+pub const HISTORY_PANEL_WIDTH: f32 = 280.0;
+pub const HISTORY_BG: Hsla = hsla(220.0 / 360.0, 0.13, 0.12, 1.0);
+pub const HISTORY_ITEM_HOVER: Hsla = hsla(220.0 / 360.0, 0.12, 0.20, 1.0);
+pub const HISTORY_ITEM_SELECTED: Hsla = hsla(210.0 / 360.0, 0.50, 0.28, 1.0);
 
-    pub scan_history_bg: Hsla,
-    pub scan_history_item_hover: Hsla,
-    pub scan_history_item_selected: Hsla,
+// Tree view
+pub const TREE_INDENT_PX: f32 = 16.0;
+pub const TREE_ROW_HEIGHT: f32 = 24.0;
+pub const TREE_HEADER_HEIGHT: f32 = 28.0;
+pub const TREE_ROW_HOVER: Hsla = hsla(220.0 / 360.0, 0.12, 0.20, 1.0);
+pub const TREE_ROW_SELECTED: Hsla = hsla(210.0 / 360.0, 0.45, 0.25, 1.0);
+pub const TREE_ROW_ALT: Hsla = hsla(220.0 / 360.0, 0.12, 0.13, 1.0);
 
-    pub column_header_bg: Hsla,
-    pub row_even: Hsla,
-    pub row_odd: Hsla,
-    pub row_hover: Hsla,
-}
+// Spacing
+pub const SPACING_XS: f32 = 4.0;
+pub const SPACING_SM: f32 = 8.0;
+pub const SPACING_MD: f32 = 12.0;
+pub const SPACING_LG: f32 = 16.0;
+pub const SPACING_XL: f32 = 24.0;
 
-impl Theme {
-    /// Returns the default dark theme.
-    pub fn dark() -> Self {
-        Self {
-            background: hsla(220.0 / 360.0, 0.14, 0.09, 1.0),
-            surface: hsla(220.0 / 360.0, 0.13, 0.12, 1.0),
-            surface_elevated: hsla(220.0 / 360.0, 0.12, 0.16, 1.0),
-            border: hsla(220.0 / 360.0, 0.10, 0.22, 1.0),
-            border_focused: hsla(210.0 / 360.0, 0.80, 0.55, 1.0),
+// Typography
+pub const FONT_SIZE_SM: f32 = 11.0;
+pub const FONT_SIZE_MD: f32 = 13.0;
+pub const FONT_SIZE_LG: f32 = 15.0;
 
-            text_primary: hsla(0.0, 0.0, 0.92, 1.0),
-            text_secondary: hsla(0.0, 0.0, 0.70, 1.0),
-            text_muted: hsla(0.0, 0.0, 0.45, 1.0),
-            text_on_accent: hsla(0.0, 0.0, 1.0, 1.0),
+use crate::types::SizeChange;
 
-            accent: hsla(210.0 / 360.0, 0.80, 0.55, 1.0),
-            accent_hover: hsla(210.0 / 360.0, 0.80, 0.62, 1.0),
-            accent_pressed: hsla(210.0 / 360.0, 0.80, 0.48, 1.0),
-
-            selection_bg: hsla(210.0 / 360.0, 0.70, 0.40, 0.5),
-            selection_text: hsla(0.0, 0.0, 1.0, 1.0),
-
-            size_increased: hsla(0.0 / 360.0, 0.75, 0.55, 1.0),
-            size_decreased: hsla(120.0 / 360.0, 0.55, 0.45, 1.0),
-            size_new: hsla(45.0 / 360.0, 0.90, 0.55, 1.0),
-            size_unchanged: hsla(0.0, 0.0, 0.50, 1.0),
-
-            progress_track: hsla(220.0 / 360.0, 0.10, 0.20, 1.0),
-            progress_fill: hsla(210.0 / 360.0, 0.70, 0.50, 1.0),
-
-            title_bar_bg: hsla(220.0 / 360.0, 0.15, 0.10, 1.0),
-            title_bar_text: hsla(0.0, 0.0, 0.85, 1.0),
-
-            button_bg: hsla(220.0 / 360.0, 0.12, 0.20, 1.0),
-            button_bg_hover: hsla(220.0 / 360.0, 0.12, 0.26, 1.0),
-            button_bg_pressed: hsla(220.0 / 360.0, 0.12, 0.16, 1.0),
-            button_text: hsla(0.0, 0.0, 0.88, 1.0),
-            button_border: hsla(220.0 / 360.0, 0.10, 0.28, 1.0),
-
-            scan_history_bg: hsla(220.0 / 360.0, 0.14, 0.11, 1.0),
-            scan_history_item_hover: hsla(220.0 / 360.0, 0.12, 0.18, 1.0),
-            scan_history_item_selected: hsla(210.0 / 360.0, 0.60, 0.30, 0.6),
-
-            column_header_bg: hsla(220.0 / 360.0, 0.13, 0.14, 1.0),
-            row_even: hsla(220.0 / 360.0, 0.13, 0.12, 1.0),
-            row_odd: hsla(220.0 / 360.0, 0.13, 0.10, 1.0),
-            row_hover: hsla(220.0 / 360.0, 0.12, 0.18, 0.8),
-        }
+/// Maps a [`SizeChange`] variant to its theme colour.
+pub fn size_change_color(change: SizeChange) -> Hsla {
+    match change {
+        SizeChange::New => COLOR_NEW,
+        SizeChange::Deleted => COLOR_DELETED,
+        SizeChange::Grew => COLOR_GREW,
+        SizeChange::Shrank => COLOR_SHRANK,
+        SizeChange::Unchanged => COLOR_UNCHANGED,
     }
-
-    /// Returns the default light theme.
-    pub fn light() -> Self {
-        Self {
-            background: hsla(0.0, 0.0, 0.97, 1.0),
-            surface: hsla(0.0, 0.0, 1.0, 1.0),
-            surface_elevated: hsla(0.0, 0.0, 0.96, 1.0),
-            border: hsla(0.0, 0.0, 0.85, 1.0),
-            border_focused: hsla(210.0 / 360.0, 0.80, 0.50, 1.0),
-
-            text_primary: hsla(0.0, 0.0, 0.10, 1.0),
-            text_secondary: hsla(0.0, 0.0, 0.35, 1.0),
-            text_muted: hsla(0.0, 0.0, 0.55, 1.0),
-            text_on_accent: hsla(0.0, 0.0, 1.0, 1.0),
-
-            accent: hsla(210.0 / 360.0, 0.80, 0.50, 1.0),
-            accent_hover: hsla(210.0 / 360.0, 0.80, 0.44, 1.0),
-            accent_pressed: hsla(210.0 / 360.0, 0.80, 0.38, 1.0),
-
-            selection_bg: hsla(210.0 / 360.0, 0.70, 0.70, 0.4),
-            selection_text: hsla(0.0, 0.0, 0.05, 1.0),
-
-            size_increased: hsla(0.0 / 360.0, 0.70, 0.45, 1.0),
-            size_decreased: hsla(120.0 / 360.0, 0.50, 0.38, 1.0),
-            size_new: hsla(38.0 / 360.0, 0.90, 0.45, 1.0),
-            size_unchanged: hsla(0.0, 0.0, 0.55, 1.0),
-
-            progress_track: hsla(0.0, 0.0, 0.88, 1.0),
-            progress_fill: hsla(210.0 / 360.0, 0.70, 0.50, 1.0),
-
-            title_bar_bg: hsla(0.0, 0.0, 0.95, 1.0),
-            title_bar_text: hsla(0.0, 0.0, 0.15, 1.0),
-
-            button_bg: hsla(0.0, 0.0, 0.92, 1.0),
-            button_bg_hover: hsla(0.0, 0.0, 0.86, 1.0),
-            button_bg_pressed: hsla(0.0, 0.0, 0.80, 1.0),
-            button_text: hsla(0.0, 0.0, 0.12, 1.0),
-            button_border: hsla(0.0, 0.0, 0.78, 1.0),
-
-            scan_history_bg: hsla(0.0, 0.0, 0.96, 1.0),
-            scan_history_item_hover: hsla(0.0, 0.0, 0.90, 1.0),
-            scan_history_item_selected: hsla(210.0 / 360.0, 0.60, 0.80, 0.5),
-
-            column_header_bg: hsla(0.0, 0.0, 0.93, 1.0),
-            row_even: hsla(0.0, 0.0, 1.0, 1.0),
-            row_odd: hsla(0.0, 0.0, 0.97, 1.0),
-            row_hover: hsla(210.0 / 360.0, 0.50, 0.92, 0.8),
-        }
-    }
-}
-
-/// Global theme accessor — returns the dark theme by default.
-pub fn current_theme() -> Theme {
-    Theme::dark()
 }
