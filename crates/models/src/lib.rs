@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+/// Represents a node in the filesystem tree.
 #[derive(Debug, Clone)]
 pub struct FsNode {
     pub name: String,
@@ -9,6 +10,7 @@ pub struct FsNode {
     pub path: PathBuf,
 }
 
+/// Represents a flattened UI-friendly view of a filesystem node.
 #[derive(Debug, Clone)]
 pub struct UiNode {
     pub name: String,
