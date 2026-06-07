@@ -1,4 +1,4 @@
-/// Metadata for a single scan session.
+/// Metadata for a scan session.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ScanMeta {
     pub id: i64,
@@ -52,7 +52,7 @@ pub struct UiNode {
     pub scan_progress: f64,
 }
 
-/// Represents a size delta with a classification and display color.
+/// Represents a size change with classification and display color.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SizeChange {
     pub delta: i64,
@@ -64,8 +64,6 @@ pub struct SizeChange {
 #[derive(Clone, Debug, PartialEq)]
 pub enum ScanMessage {
     DirScanned { path: String, size: u64 },
-    ScanError { path: String, message: String },
+    ScanError { path: String, error: String },
     Complete { total_size: u64 },
 }
-
-Now I need to make sure the workspace `Cargo.toml` at the repo root includes `crates/models` as a member. If a workspace `Cargo.toml` exists, it needs to list this crate:
