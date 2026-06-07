@@ -1,7 +1,2 @@
-# Build configuration for the utils crate.
-# Enables faster incremental compilation during development.
-
 [build]
-# Use all available logical CPUs for parallel code-generation units in dev builds.
-# (Release profile overrides this with codegen-units = 1 for maximum optimisation.)
-incremental = true
+rustflags = ["-C", "target-cpu=native"]

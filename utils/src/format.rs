@@ -1,4 +1,4 @@
-//! Formatting utilities: human-readable sizes and comma-separated numbers.
+//! Formatting utilities for sizes and numbers.
 
 /// Converts a byte count into a human-readable string with 2 decimal places.
 ///
