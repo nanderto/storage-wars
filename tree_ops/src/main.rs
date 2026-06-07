@@ -1,85 +1,125 @@
-//! Binary entry point for the `tree_ops` crate.
+// path: tree_ops/src/main.rs
+//! Entry point for the tree_ops binary (demonstration / smoke test).
 //!
-//! This binary is intentionally minimal. All production logic lives in the
-//! library (`lib.rs`). The binary exists so the crate can be compiled as both
-//! a library and a standalone executable for quick smoke-testing.
+//! The primary interface is the library crate (`lib.rs`). This binary
+//! provides a minimal runnable entry point so `cargo run` succeeds.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use tree_ops::{
-    build_baseline_map, build_fs_tree, flatten_tree, insert_children,
-    merge_baseline, recalculate_sizes, DbNode, FsNode,
+    build_baseline_map, build_fs_tree, flatten_tree, insert_children, merge_baseline,
+    recalculate_sizes, DbNode, FsNode,
 };
-use tree_ops::recalculate_sizes::recalculate_sizes_forest;
-use tree_ops::baseline::merge_baseline_forest;
 
 fn main() {
-    println!("tree_ops — smoke test");
+    println!("tree_ops — tree manipulation utilities");
 
-    // ── 1. Build a tree from flat DbNodes ────────────────────────────────────
-    let db_nodes = vec![
-        DbNode { id: 1, parent_id: None,    name: "root".into(),  path: PathBuf::from("/root"),       size: 0,    is_dir: true,  child_count: 2 },
-        DbNode { id: 2, parent_id: Some(1), name: "docs".into(),  path: PathBuf::from("/root/docs"),  size: 0,    is_dir: true,  child_count: 1 },
-        DbNode { id: 3, parent_id: Some(2), name: "a.txt".into(), path: PathBuf::from("/root/docs/a.txt"), size: 1024, is_dir: false, child_count: 0 },
-        DbNode { id: 4, parent_id: Some(1), name: "b.bin".into(), path: PathBuf::from("/root/b.bin"), size: 2048, is_dir: false, child_count: 0 },
+    // ── 1. Build a sample flat DbNode list ──────────────────────────────────
+    let db_nodes: Vec<DbNode> = vec![
+        DbNode {
+            id: 1,
+            parent_id: None,
+            path: PathBuf::from("/home/user"),
+            size: 0,
+            item_count: 0,
+            is_dir: true,
+        },
+        DbNode {
+            id: 2,
+            parent_id: Some(1),
+            path: PathBuf::from("/home/user/documents"),
+            size: 0,
+            item_count: 0,
+            is_dir: true,
+        },
+        DbNode {
+            id: 3,
+            parent_id: Some(2),
+            path: PathBuf::from("/home/user/documents/report.pdf"),
+            size: 2_048_000,
+            item_count: 0,
+            is_dir: false,
+        },
+        DbNode {
+            id: 4,
+            parent_id: Some(1),
+            path: PathBuf::from("/home/user/pictures"),
+            size: 0,
+            item_count: 0,
+            is_dir: true,
+        },
+        DbNode {
+            id: 5,
+            parent_id: Some(4),
+            path: PathBuf::from("/home/user/pictures/photo.jpg"),
+            size: 5_120_000,
+            item_count: 0,
+            is_dir: false,
+        },
     ];
 
-    let mut forest = build_fs_tree(&db_nodes);
-    println!("Roots after build_fs_tree: {}", forest.len());
+    // ── 2. Reconstruct the FsNode hierarchy ─────────────────────────────────
+    let mut forest: Vec<FsNode> = build_fs_tree(&db_nodes);
+    println!("\n[build_fs_tree] Root nodes: {}", forest.len());
 
-    // ── 2. Recalculate sizes bottom-up ───────────────────────────────────────
-    recalculate_sizes_forest(&mut forest);
-    println!("Root size after recalculate: {}", forest[0].size);
-
-    // ── 3. Build baseline snapshot ───────────────────────────────────────────
-    let baseline = build_baseline_map(&forest);
-    println!("Baseline entries: {}", baseline.len());
-
-    // ── 4. Simulate a size change and merge baseline ──────────────────────────
-    if let Some(root) = forest.first_mut() {
-        if let Some(child) = root.children.iter_mut().find(|c| c.name == "b.bin") {
-            child.size = 4096;
-        }
-    }
-    merge_baseline_forest(&mut forest, &baseline);
-    println!(
-        "b.bin prev_size: {:?}",
-        forest[0].children.iter().find(|c| c.name == "b.bin").and_then(|n| n.prev_size)
-    );
-
-    // ── 5. Insert children ────────────────────────────────────────────────────
-    let new_child = FsNode::new(5, "c.txt", PathBuf::from("/root/docs/c.txt"), 512, false);
-    if let Some(root) = forest.first_mut() {
-        insert_children(root, &PathBuf::from("/root/docs"), vec![new_child]);
-    }
-    println!(
-        "docs children after insert: {}",
-        forest[0]
-            .children
-            .iter()
-            .find(|c| c.name == "docs")
-            .map(|d| d.children.len())
-            .unwrap_or(0)
-    );
-
-    // ── 6. Flatten for UI ─────────────────────────────────────────────────────
-    let mut expanded = HashSet::new();
-    expanded.insert(PathBuf::from("/root"));
-    expanded.insert(PathBuf::from("/root/docs"));
-
-    let ui_nodes = flatten_tree(&forest, &expanded);
-    println!("UI nodes visible: {}", ui_nodes.len());
-    for ui in &ui_nodes {
+    // ── 3. Recalculate sizes bottom-up ──────────────────────────────────────
+    recalculate_sizes(&mut forest);
+    if let Some(root) = forest.first() {
         println!(
-            "  {:>depth$}{name}  size={size}  progress={progress:.2}",
-            "",
-            depth = ui.depth * 2,
-            name = ui.name,
-            size = ui.size,
-            progress = ui.scan_progress,
+            "[recalculate_sizes] Root '{}' size={} item_count={}",
+            root.path.display(),
+            root.size,
+            root.item_count
         );
     }
 
-    println!("smoke test passed ✓");
+    // ── 4. Build a baseline map (snapshot before changes) ───────────────────
+    let baseline: HashMap<PathBuf, u64> = build_baseline_map(&forest);
+    println!("[build_baseline_map] Entries: {}", baseline.len());
+
+    // ── 5. Insert new children into a node ──────────────────────────────────
+    let new_children = vec![FsNode {
+        id: 6,
+        path: PathBuf::from("/home/user/documents/notes.txt"),
+        size: 4_096,
+        item_count: 0,
+        is_dir: false,
+        children: vec![],
+    }];
+    let updated = insert_children(
+        &mut forest,
+        &PathBuf::from("/home/user/documents"),
+        new_children,
+    );
+    println!("[insert_children] Parent found and updated: {updated}");
+
+    // Recalculate after structural change.
+    recalculate_sizes(&mut forest);
+
+    // ── 6. Flatten the tree for UI rendering ────────────────────────────────
+    let mut expanded: HashSet<PathBuf> = HashSet::new();
+    expanded.insert(PathBuf::from("/home/user"));
+    expanded.insert(PathBuf::from("/home/user/documents"));
+    expanded.insert(PathBuf::from("/home/user/pictures"));
+
+    let mut ui_nodes = flatten_tree(&forest, &expanded);
+    println!("[flatten_tree] UI nodes: {}", ui_nodes.len());
+
+    // ── 7. Merge baseline into UI nodes for change detection ─────────────────
+    merge_baseline(&mut ui_nodes, &baseline);
+    println!("[merge_baseline] Nodes with prev_size:");
+    for n in &ui_nodes {
+        if let Some(prev) = n.prev_size {
+            println!(
+                "  {} size={} prev_size={} delta={}",
+                n.path.display(),
+                n.size,
+                prev,
+                n.size as i64 - prev as i64
+            );
+        }
+    }
+
+    println!("\nAll operations completed successfully.");
 }

@@ -1,56 +1,45 @@
-//! Baseline snapshot utilities: building a path→size map and merging it into a tree.
+//! Baseline map construction and merging for change detection.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use crate::models::{BaselineMap, FsNode};
+use crate::models::{FsNode, UiNode};
 
-/// Builds a `BaselineMap` (`PathBuf → u64`) from a slice of `FsNode` trees.
+/// Builds a `HashMap<PathBuf, u64>` lookup from a forest of `FsNode` trees.
 ///
-/// Every node in the forest (including all descendants) is visited and its
-/// `path → size` pair is inserted into the map.
+/// Every node in the forest (recursively) is included in the map, keyed by
+/// its `path` with its `size` as the value.
 ///
 /// # Arguments
-///
-/// * `roots` — Root nodes of the forest to snapshot.
+/// * `nodes` - The forest of `FsNode` trees to index.
 ///
 /// # Returns
-///
-/// A `HashMap<PathBuf, u64>` mapping each node's path to its current size.
-pub fn build_baseline_map(roots: &[FsNode]) -> BaselineMap {
+/// A flat map of `PathBuf → size` for all nodes in the forest.
+pub fn build_baseline_map(nodes: &[FsNode]) -> HashMap<PathBuf, u64> {
     let mut map = HashMap::new();
-    for root in roots {
-        collect_into_map(root, &mut map);
+    for node in nodes {
+        collect_into_map(node, &mut map);
     }
     map
 }
 
-fn collect_into_map(node: &FsNode, map: &mut BaselineMap) {
+fn collect_into_map(node: &FsNode, map: &mut HashMap<PathBuf, u64>) {
     map.insert(node.path.clone(), node.size);
     for child in &node.children {
         collect_into_map(child, map);
     }
 }
 
-/// Populates the `prev_size` field of every node in the tree from a baseline map.
+/// Populates the `prev_size` field of each `UiNode` from a baseline map.
 ///
-/// If a node's path is present in `baseline`, `prev_size` is set to the
-/// corresponding value. Otherwise `prev_size` is left as `None`.
+/// For each `UiNode`, if its `path` exists in `baseline`, `prev_size` is set
+/// to `Some(baseline_size)`. Otherwise it remains `None` (new node).
 ///
 /// # Arguments
-///
-/// * `node`     — Mutable reference to the root of the subtree to update.
-/// * `baseline` — The baseline map produced by [`build_baseline_map`].
-pub fn merge_baseline(node: &mut FsNode, baseline: &BaselineMap) {
-    node.prev_size = baseline.get(&node.path).copied();
-    for child in &mut node.children {
-        merge_baseline(child, baseline);
-    }
-}
-
-/// Forest variant of [`merge_baseline`].
-pub fn merge_baseline_forest(roots: &mut Vec<FsNode>, baseline: &BaselineMap) {
-    for root in roots.iter_mut() {
-        merge_baseline(root, baseline);
+/// * `nodes` - Mutable slice of `UiNode` items to update.
+/// * `baseline` - The baseline map produced by [`build_baseline_map`].
+pub fn merge_baseline(nodes: &mut Vec<UiNode>, baseline: &HashMap<PathBuf, u64>) {
+    for node in nodes.iter_mut() {
+        node.prev_size = baseline.get(&node.path).copied();
     }
 }
 
@@ -58,18 +47,29 @@ pub fn merge_baseline_forest(roots: &mut Vec<FsNode>, baseline: &BaselineMap) {
 mod tests {
     use super::*;
     use std::path::PathBuf;
-    use crate::models::FsNode;
 
-    fn make_node(id: u64, path: &str, size: u64, children: Vec<FsNode>) -> FsNode {
+    fn make_fs_node(id: u64, path: &str, size: u64, children: Vec<FsNode>) -> FsNode {
         FsNode {
             id,
-            name: path.split('/').last().unwrap_or(path).into(),
             path: PathBuf::from(path),
             size,
-            prev_size: None,
+            item_count: 0,
             is_dir: !children.is_empty(),
-            file_count: 0,
             children,
+        }
+    }
+
+    fn make_ui_node(id: u64, path: &str, size: u64) -> UiNode {
+        UiNode {
+            id,
+            path: PathBuf::from(path),
+            size,
+            item_count: 0,
+            is_dir: false,
+            depth: 0,
+            is_expanded: false,
+            scan_progress: 1.0,
+            prev_size: None,
         }
     }
 
@@ -80,19 +80,24 @@ mod tests {
     }
 
     #[test]
-    fn test_build_baseline_map_single() {
-        let node = make_node(1, "/root", 1024, vec![]);
-        let map = build_baseline_map(&[node]);
-        assert_eq!(map.get(&PathBuf::from("/root")), Some(&1024));
+    fn test_build_baseline_map_flat() {
+        let nodes = vec![
+            make_fs_node(1, "/a", 100, vec![]),
+            make_fs_node(2, "/b", 200, vec![]),
+        ];
+        let map = build_baseline_map(&nodes);
+        assert_eq!(map.len(), 2);
+        assert_eq!(map[&PathBuf::from("/a")], 100);
+        assert_eq!(map[&PathBuf::from("/b")], 200);
     }
 
     #[test]
     fn test_build_baseline_map_nested() {
-        let root = make_node(1, "/root", 300, vec![
-            make_node(2, "/root/a", 100, vec![]),
-            make_node(3, "/root/b", 200, vec![]),
-        ]);
-        let map = build_baseline_map(&[root]);
+        let nodes = vec![make_fs_node(1, "/root", 300, vec![
+            make_fs_node(2, "/root/a", 100, vec![]),
+            make_fs_node(3, "/root/b", 200, vec![]),
+        ])];
+        let map = build_baseline_map(&nodes);
         assert_eq!(map.len(), 3);
         assert_eq!(map[&PathBuf::from("/root")], 300);
         assert_eq!(map[&PathBuf::from("/root/a")], 100);
@@ -101,50 +106,35 @@ mod tests {
 
     #[test]
     fn test_merge_baseline_sets_prev_size() {
-        let mut node = make_node(1, "/root", 500, vec![]);
+        let mut ui_nodes = vec![
+            make_ui_node(1, "/a", 150),
+            make_ui_node(2, "/b", 250),
+            make_ui_node(3, "/new", 50),
+        ];
         let mut baseline = HashMap::new();
-        baseline.insert(PathBuf::from("/root"), 400u64);
-        merge_baseline(&mut node, &baseline);
-        assert_eq!(node.prev_size, Some(400));
+        baseline.insert(PathBuf::from("/a"), 100_u64);
+        baseline.insert(PathBuf::from("/b"), 200_u64);
+
+        merge_baseline(&mut ui_nodes, &baseline);
+
+        assert_eq!(ui_nodes[0].prev_size, Some(100));
+        assert_eq!(ui_nodes[1].prev_size, Some(200));
+        assert_eq!(ui_nodes[2].prev_size, None); // new node, not in baseline
     }
 
     #[test]
-    fn test_merge_baseline_missing_path() {
-        let mut node = make_node(1, "/root", 500, vec![]);
+    fn test_merge_baseline_empty_nodes() {
+        let mut ui_nodes: Vec<UiNode> = vec![];
         let baseline = HashMap::new();
-        merge_baseline(&mut node, &baseline);
-        assert_eq!(node.prev_size, None);
+        merge_baseline(&mut ui_nodes, &baseline);
+        assert!(ui_nodes.is_empty());
     }
 
     #[test]
-    fn test_merge_baseline_recursive() {
-        let mut root = make_node(1, "/root", 300, vec![
-            make_node(2, "/root/child", 100, vec![]),
-        ]);
-        let mut baseline = HashMap::new();
-        baseline.insert(PathBuf::from("/root"), 250u64);
-        baseline.insert(PathBuf::from("/root/child"), 80u64);
-        merge_baseline(&mut root, &baseline);
-        assert_eq!(root.prev_size, Some(250));
-        assert_eq!(root.children[0].prev_size, Some(80));
-    }
-
-    #[test]
-    fn test_round_trip_baseline() {
-        let roots = vec![make_node(1, "/root", 1000, vec![
-            make_node(2, "/root/x", 600, vec![]),
-            make_node(3, "/root/y", 400, vec![]),
-        ])];
-        let baseline = build_baseline_map(&roots);
-
-        let mut updated_roots = vec![make_node(1, "/root", 1200, vec![
-            make_node(2, "/root/x", 700, vec![]),
-            make_node(3, "/root/y", 500, vec![]),
-        ])];
-        merge_baseline_forest(&mut updated_roots, &baseline);
-
-        assert_eq!(updated_roots[0].prev_size, Some(1000));
-        assert_eq!(updated_roots[0].children[0].prev_size, Some(600));
-        assert_eq!(updated_roots[0].children[1].prev_size, Some(400));
+    fn test_merge_baseline_empty_baseline() {
+        let mut ui_nodes = vec![make_ui_node(1, "/a", 100)];
+        let baseline = HashMap::new();
+        merge_baseline(&mut ui_nodes, &baseline);
+        assert_eq!(ui_nodes[0].prev_size, None);
     }
 }

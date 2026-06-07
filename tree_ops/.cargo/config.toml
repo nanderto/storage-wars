@@ -1,0 +1,3 @@
+[build]
+# Use all available CPUs for faster compilation.
+jobs = 0

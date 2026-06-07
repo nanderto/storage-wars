@@ -1,71 +1,65 @@
-//! Converts a nested `FsNode` tree into a flat `Vec<UiNode>` for UI rendering.
+//! Converts a nested `FsNode` hierarchy into a flat `Vec<UiNode>` for UI rendering.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
 use crate::models::{FsNode, UiNode};
 
-/// Flattens a slice of root `FsNode` trees into a `Vec<UiNode>` suitable for
-/// rendering in a list-based UI component.
+/// Flattens a forest of `FsNode` trees into a `Vec<UiNode>` suitable for UI display.
 ///
-/// # Behaviour
-///
-/// * Only nodes whose ancestors are all present in `expanded_paths` are included
-///   (the roots themselves are always included).
-/// * `scan_progress` for each node is computed as `node.size / max_sibling_size`
-///   where `max_sibling_size` is the largest `size` among all siblings at the
-///   same level. If all siblings have size `0`, `scan_progress` is `0.0`.
-/// * `depth` starts at `0` for root nodes.
+/// Only children of nodes whose paths are in `expanded_paths` are included.
+/// The `scan_progress` field of each `UiNode` is set to the node's size divided
+/// by the maximum sibling size (fraction of the largest sibling), or `1.0` if
+/// there are no siblings or the max size is zero.
 ///
 /// # Arguments
-///
-/// * `roots`          — Root nodes of the forest.
-/// * `expanded_paths` — Set of paths that are currently expanded in the UI.
+/// * `roots` - The root nodes of the forest to flatten.
+/// * `expanded_paths` - Set of paths that are currently expanded in the UI.
 ///
 /// # Returns
-///
-/// A depth-first ordered `Vec<UiNode>`.
+/// A flat `Vec<UiNode>` in pre-order traversal order.
 pub fn flatten_tree(roots: &[FsNode], expanded_paths: &HashSet<PathBuf>) -> Vec<UiNode> {
     let mut result = Vec::new();
-    let max_sibling = max_size_among(roots);
-    for node in roots {
-        flatten_node(node, 0, max_sibling, expanded_paths, &mut result);
-    }
+    flatten_siblings(roots, expanded_paths, 0, &mut result);
     result
 }
 
-/// Returns the maximum `size` among a slice of nodes, or `1` if all are zero
-/// (to avoid division by zero).
-fn max_size_among(nodes: &[FsNode]) -> u64 {
-    nodes.iter().map(|n| n.size).max().unwrap_or(0).max(1)
-}
-
-fn flatten_node(
-    node: &FsNode,
-    depth: usize,
-    max_sibling_size: u64,
+fn flatten_siblings(
+    siblings: &[FsNode],
     expanded_paths: &HashSet<PathBuf>,
-    out: &mut Vec<UiNode>,
+    depth: usize,
+    result: &mut Vec<UiNode>,
 ) {
-    let is_expanded = node.is_dir && expanded_paths.contains(&node.path);
-    let scan_progress = node.size as f64 / max_sibling_size as f64;
+    if siblings.is_empty() {
+        return;
+    }
 
-    out.push(UiNode {
-        id: node.id,
-        name: node.name.clone(),
-        path: node.path.clone(),
-        size: node.size,
-        prev_size: node.prev_size,
-        is_dir: node.is_dir,
-        depth,
-        is_expanded,
-        scan_progress,
-        file_count: node.file_count,
-    });
+    // Compute the maximum size among siblings for scan_progress calculation.
+    let max_size = siblings.iter().map(|n| n.size).max().unwrap_or(0);
 
-    if is_expanded && !node.children.is_empty() {
-        let child_max = max_size_among(&node.children);
-        for child in &node.children {
-            flatten_node(child, depth + 1, child_max, expanded_paths, out);
+    for node in siblings {
+        let is_expanded = expanded_paths.contains(&node.path);
+
+        let scan_progress = if max_size == 0 {
+            1.0_f64
+        } else {
+            node.size as f64 / max_size as f64
+        };
+
+        result.push(UiNode {
+            id: node.id,
+            path: node.path.clone(),
+            size: node.size,
+            item_count: node.item_count,
+            is_dir: node.is_dir,
+            depth,
+            is_expanded,
+            scan_progress,
+            prev_size: None,
+        });
+
+        // Recurse into children only if this node is expanded.
+        if is_expanded && !node.children.is_empty() {
+            flatten_siblings(&node.children, expanded_paths, depth + 1, result);
         }
     }
 }
@@ -74,17 +68,14 @@ fn flatten_node(
 mod tests {
     use super::*;
     use std::path::PathBuf;
-    use crate::models::FsNode;
 
-    fn make_node(id: u64, name: &str, size: u64, is_dir: bool, children: Vec<FsNode>) -> FsNode {
+    fn make_fs_node(id: u64, path: &str, size: u64, children: Vec<FsNode>) -> FsNode {
         FsNode {
             id,
-            name: name.into(),
-            path: PathBuf::from(format!("/{name}")),
+            path: PathBuf::from(path),
             size,
-            prev_size: None,
-            is_dir,
-            file_count: 0,
+            item_count: children.len() as u64,
+            is_dir: !children.is_empty(),
             children,
         }
     }
@@ -97,11 +88,11 @@ mod tests {
 
     #[test]
     fn test_single_root_not_expanded() {
-        let root = make_node(1, "root", 100, true, vec![
-            make_node(2, "child", 50, false, vec![]),
-        ]);
-        let result = flatten_tree(&[root], &HashSet::new());
-        // Root is included; child is hidden because root is not expanded.
+        let roots = vec![make_fs_node(1, "/root", 100, vec![
+            make_fs_node(2, "/root/a", 50, vec![]),
+        ])];
+        let expanded = HashSet::new();
+        let result = flatten_tree(&roots, &expanded);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, 1);
         assert!(!result[0].is_expanded);
@@ -109,50 +100,57 @@ mod tests {
 
     #[test]
     fn test_expanded_shows_children() {
-        let root = make_node(1, "root", 100, true, vec![
-            make_node(2, "child", 50, false, vec![]),
-        ]);
+        let roots = vec![make_fs_node(1, "/root", 100, vec![
+            make_fs_node(2, "/root/a", 60, vec![]),
+            make_fs_node(3, "/root/b", 40, vec![]),
+        ])];
         let mut expanded = HashSet::new();
         expanded.insert(PathBuf::from("/root"));
 
-        let result = flatten_tree(&[root], &expanded);
-        assert_eq!(result.len(), 2);
+        let result = flatten_tree(&roots, &expanded);
+        assert_eq!(result.len(), 3);
         assert_eq!(result[0].id, 1);
-        assert!(result[0].is_expanded);
         assert_eq!(result[1].id, 2);
-        assert_eq!(result[1].depth, 1);
+        assert_eq!(result[2].id, 3);
     }
 
     #[test]
     fn test_scan_progress_fraction() {
         let roots = vec![
-            make_node(1, "a", 50, false, vec![]),
-            make_node(2, "b", 100, false, vec![]),
+            make_fs_node(1, "/a", 100, vec![]),
+            make_fs_node(2, "/b", 50, vec![]),
         ];
         let result = flatten_tree(&roots, &HashSet::new());
         assert_eq!(result.len(), 2);
-        // Node with size 100 should have progress 1.0.
-        let b = result.iter().find(|n| n.id == 2).unwrap();
-        assert!((b.scan_progress - 1.0).abs() < f64::EPSILON);
-        // Node with size 50 should have progress 0.5.
-        let a = result.iter().find(|n| n.id == 1).unwrap();
-        assert!((a.scan_progress - 0.5).abs() < f64::EPSILON);
+        assert!((result[0].scan_progress - 1.0).abs() < f64::EPSILON);
+        assert!((result[1].scan_progress - 0.5).abs() < f64::EPSILON);
     }
 
     #[test]
     fn test_depth_increments() {
-        let root = make_node(1, "root", 100, true, vec![
-            make_node(2, "mid", 80, true, vec![
-                make_node(3, "leaf", 40, false, vec![]),
+        let roots = vec![make_fs_node(1, "/root", 100, vec![
+            make_fs_node(2, "/root/a", 100, vec![
+                make_fs_node(3, "/root/a/b", 100, vec![]),
             ]),
-        ]);
+        ])];
         let mut expanded = HashSet::new();
         expanded.insert(PathBuf::from("/root"));
-        expanded.insert(PathBuf::from("/mid"));
+        expanded.insert(PathBuf::from("/root/a"));
 
-        let result = flatten_tree(&[root], &expanded);
+        let result = flatten_tree(&roots, &expanded);
         assert_eq!(result[0].depth, 0);
         assert_eq!(result[1].depth, 1);
         assert_eq!(result[2].depth, 2);
+    }
+
+    #[test]
+    fn test_zero_size_siblings() {
+        let roots = vec![
+            make_fs_node(1, "/a", 0, vec![]),
+            make_fs_node(2, "/b", 0, vec![]),
+        ];
+        let result = flatten_tree(&roots, &HashSet::new());
+        assert!((result[0].scan_progress - 1.0).abs() < f64::EPSILON);
+        assert!((result[1].scan_progress - 1.0).abs() < f64::EPSILON);
     }
 }
