@@ -7,7 +7,7 @@ pub struct ScanMeta {
     pub total_size: u64,
 }
 
-/// A node in the filesystem tree.
+/// Represents a node in the filesystem tree.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FsNode {
     pub name: String,
@@ -31,10 +31,9 @@ pub struct DbNode {
     pub path: String,
     pub size: u64,
     pub is_dir: bool,
-    pub modified: String,
 }
 
-/// Information about a drive / volume.
+/// Information about a drive/volume.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DriveInfo {
     pub name: String,
@@ -43,24 +42,24 @@ pub struct DriveInfo {
     pub available_space: u64,
 }
 
-/// FsNode wrapper carrying UI-specific state.
+/// FsNode wrapper for UI display with additional state.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiNode {
     pub node: FsNode,
     pub depth: u32,
     pub expanded: bool,
-    pub scan_progress: f32,
+    pub scan_progress: f64,
 }
 
-/// Represents a size delta with a classification and display colour.
+/// Represents a size delta with classification and display color.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SizeChange {
     pub delta: i64,
-    pub classification: String,
+    pub label: String,
     pub hex_color: String,
 }
 
-/// Messages emitted during a scan.
+/// Messages emitted during a scan operation.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ScanMessage {
     DirScanned { path: String, size: u64 },
