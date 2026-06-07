@@ -1,27 +1,14 @@
-//! Drive enumeration using `sysinfo`.
+//! Drive enumeration using the `sysinfo` crate.
+//!
+//! On Windows, drive mount points are normalized to the conventional
+//! `C:\` letter format. On other platforms the raw mount point is returned.
 
 use sysinfo::Disks;
 
-/// Represents a single drive/disk with its mount point and storage metrics.
-#[derive(Debug, Clone, PartialEq)]
-pub struct DriveInfo {
-    /// Normalized drive identifier.
-    ///
-    /// On Windows, single-character drive letters are uppercased and suffixed with `:\`
-    /// (e.g. `"C:\"`, `"D:\"`).  On other platforms the raw mount-point string is used.
-    pub name: String,
-    /// Total disk capacity in bytes.
-    pub total_bytes: u64,
-    /// Available (free) disk space in bytes.
-    pub available_bytes: u64,
-}
-
-/// Enumerates all disks visible to the OS and returns a [`Vec<DriveInfo>`].
+/// Returns a list of drive/disk mount points available on the system.
 ///
-/// Drive letter normalization (Windows):
-/// - Mount points that are a single ASCII letter are expanded to `X:\` form.
-/// - The letter is uppercased.
+/// On Windows, paths like `\\?\Volume{...}\` or `/C:` are normalized to
+/// the conventional `C:\` drive-letter format when possible.
 ///
 /// # Examples
-///
 ///

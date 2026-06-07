@@ -1,19 +1,19 @@
-//! Binary entry point for the `utils` crate.
+//! Entry point for the utils binary.
 //!
-//! Demonstrates all public utilities:
-//! - [`format_size`]
-//! - [`format_number`]
-//! - [`chrono_now`]
-//! - [`format_system_time`]
-//! - [`enumerate_drives`]
+//! Demonstrates all utility functions provided by this crate.
 
 use utils::{
-    chrono_now, enumerate_drives, format_number, format_size, format_system_time,
+    format_size,
+    format_number,
+    chrono_now,
+    format_system_time,
+    days_to_ymd,
+    enumerate_drives,
 };
-use std::time::UNIX_EPOCH;
+use std::time::SystemTime;
 
 fn main() {
-    // ── format_size ──────────────────────────────────────────────────────────
+    // --- format_size ---
     println!("=== format_size ===");
     let sizes: &[u64] = &[
         0,
@@ -25,41 +25,44 @@ fn main() {
         1_099_511_627_776,
     ];
     for &bytes in sizes {
-        println!("  {:>20} bytes  →  {}", bytes, format_size(bytes));
+        println!("  {} bytes => {}", bytes, format_size(bytes));
     }
 
-    // ── format_number ────────────────────────────────────────────────────────
+    // --- format_number ---
     println!("\n=== format_number ===");
-    let numbers: &[u64] = &[0, 999, 1_000, 1_234_567, 1_234_567_890, u64::MAX];
+    let numbers: &[u64] = &[0, 999, 1_000, 1_234_567, 9_876_543_210];
     for &n in numbers {
-        println!("  {:>25}  →  {}", n, format_number(n));
+        println!("  {} => {}", n, format_number(n));
     }
 
-    // ── chrono_now ───────────────────────────────────────────────────────────
+    // --- chrono_now ---
     println!("\n=== chrono_now ===");
-    println!("  Current UTC: {}", chrono_now());
+    let now = chrono_now();
+    println!("  Current UTC timestamp: {}", now);
 
-    // ── format_system_time ───────────────────────────────────────────────────
+    // --- format_system_time ---
     println!("\n=== format_system_time ===");
-    println!("  Unix epoch : {}", format_system_time(UNIX_EPOCH));
-    println!(
-        "  Now        : {}",
-        format_system_time(std::time::SystemTime::now())
-    );
+    let sys_time = SystemTime::now();
+    let formatted = format_system_time(sys_time);
+    println!("  SystemTime formatted: {}", formatted);
 
-    // ── enumerate_drives ─────────────────────────────────────────────────────
+    // --- days_to_ymd ---
+    println!("\n=== days_to_ymd ===");
+    // Day 0 in the Hinnant algorithm corresponds to 1970-01-01
+    let test_days: &[i64] = &[0, 1, 365, 366, 18628];
+    for &d in test_days {
+        let (y, m, day) = days_to_ymd(d);
+        println!("  days={} => {:04}-{:02}-{:02}", d, y, m, day);
+    }
+
+    // --- enumerate_drives ---
     println!("\n=== enumerate_drives ===");
     let drives = enumerate_drives();
     if drives.is_empty() {
-        println!("  (no drives detected)");
+        println!("  No drives found.");
     } else {
         for drive in &drives {
-            println!(
-                "  {}  total={}  available={}",
-                drive.name,
-                format_size(drive.total_bytes),
-                format_size(drive.available_bytes),
-            );
+            println!("  Drive: {}", drive);
         }
     }
 }
