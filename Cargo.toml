@@ -1,10 +1,4 @@
-[workspace]
-resolver = "2"
-members = [
-    "crates/models",
-    "crates/tree_ops",
-    "crates/views",
-]
-
-[workspace.dependencies]
-gpui = "0.1.0"
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ workspace.members
++"crates/views",
