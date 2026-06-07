@@ -1,1 +1,3 @@
-//! Reconstruct an `FsNode` hierarchy from a flat `Vec<DbNode>` list via `parent_id`.
+//! Rebuild an `FsNode` hierarchy from a flat `Vec<DbNode>` using `parent_id` references.
+
+// TODO: implement build_fs_tree
