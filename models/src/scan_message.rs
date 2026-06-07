@@ -1,43 +1,43 @@
-//! Messages emitted during an active scan session.
+//! Messages emitted during a scan session.
 
 use serde::{Deserialize, Serialize};
 
-use crate::fs_node::FsNode;
+use crate::FsNode;
 
-/// Messages produced by the scanner and consumed by the UI or persistence
-/// layer during an active scan session.
+/// Messages produced by the scanner and consumed by the UI or storage layer.
+///
+/// These messages form the communication protocol between the background
+/// scanning thread and the rest of the application.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ScanMessage {
-    /// A directory has been fully scanned.
-    ///
-    /// Contains the [`FsNode`] representing the scanned directory and the
-    /// total number of items processed so far.
+    /// Emitted each time a directory has been fully scanned.
     DirScanned {
-        /// The fully populated node for the scanned directory.
+        /// The scanned directory node, including its immediate children.
         node: FsNode,
-        /// Running count of items (files + directories) processed so far.
-        items_processed: u64,
+        /// The total number of items scanned so far in this session.
+        items_scanned: u64,
     },
 
-    /// A non-fatal error occurred while scanning a path.
-    ///
-    /// The scan continues after emitting this message.
+    /// Emitted when a non-fatal error occurs while scanning a path.
     ScanError {
-        /// The path that could not be accessed or processed.
+        /// The path that caused the error.
         path: String,
-        /// Human-readable description of the error.
+        /// A human-readable description of the error.
         message: String,
     },
 
-    /// The scan session has finished.
-    ///
-    /// Contains the root [`FsNode`] of the fully scanned tree and a flag
-    /// indicating whether the scan completed without any errors.
+    /// Emitted once when the entire scan has finished.
     Complete {
-        /// The root node of the completed scan tree.
+        /// The root node of the fully scanned tree.
         root: FsNode,
-        /// `true` if no errors were encountered during the scan.
-        success: bool,
+        /// Total number of files found.
+        total_files: u64,
+        /// Total number of folders found.
+        total_folders: u64,
+        /// Total size in bytes of all scanned items.
+        total_size: u64,
+        /// Number of errors encountered during the scan.
+        error_count: u64,
     },
 }
 
@@ -51,43 +51,80 @@ impl ScanMessage {
     pub fn is_error(&self) -> bool {
         matches!(self, ScanMessage::ScanError { .. })
     }
+
+    /// Returns the path associated with this message, if any.
+    pub fn path(&self) -> Option<&str> {
+        match self {
+            ScanMessage::DirScanned { node, .. } => Some(&node.path),
+            ScanMessage::ScanError { path, .. } => Some(path),
+            ScanMessage::Complete { root, .. } => Some(&root.path),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn dummy_node() -> FsNode {
-        FsNode::new("root", "/", true)
+    fn sample_node() -> FsNode {
+        FsNode::new_dir("root", "/")
     }
 
     #[test]
-    fn is_complete_returns_true_for_complete_variant() {
-        let msg = ScanMessage::Complete {
-            root: dummy_node(),
-            success: true,
+    fn test_dir_scanned_message() {
+        let msg = ScanMessage::DirScanned {
+            node: sample_node(),
+            items_scanned: 42,
         };
-        assert!(msg.is_complete());
+        assert!(!msg.is_complete());
         assert!(!msg.is_error());
+        assert_eq!(msg.path(), Some("/"));
     }
 
     #[test]
-    fn is_error_returns_true_for_scan_error_variant() {
+    fn test_scan_error_message() {
         let msg = ScanMessage::ScanError {
-            path: "/locked".to_string(),
+            path: "/restricted".to_string(),
             message: "Permission denied".to_string(),
         };
         assert!(msg.is_error());
         assert!(!msg.is_complete());
+        assert_eq!(msg.path(), Some("/restricted"));
     }
 
     #[test]
-    fn dir_scanned_is_neither_complete_nor_error() {
-        let msg = ScanMessage::DirScanned {
-            node: dummy_node(),
-            items_processed: 42,
+    fn test_complete_message() {
+        let msg = ScanMessage::Complete {
+            root: sample_node(),
+            total_files: 1000,
+            total_folders: 50,
+            total_size: 5_000_000,
+            error_count: 2,
         };
-        assert!(!msg.is_complete());
+        assert!(msg.is_complete());
         assert!(!msg.is_error());
+        assert_eq!(msg.path(), Some("/"));
+    }
+
+    #[test]
+    fn test_serialization_roundtrip() {
+        let msg = ScanMessage::DirScanned {
+            node: sample_node(),
+            items_scanned: 10,
+        };
+        let json = serde_json::to_string(&msg).expect("serialization failed");
+        let restored: ScanMessage = serde_json::from_str(&json).expect("deserialization failed");
+        assert_eq!(msg, restored);
+    }
+
+    #[test]
+    fn test_error_serialization_roundtrip() {
+        let msg = ScanMessage::ScanError {
+            path: "/foo/bar".to_string(),
+            message: "IO error".to_string(),
+        };
+        let json = serde_json::to_string(&msg).expect("serialization failed");
+        let restored: ScanMessage = serde_json::from_str(&json).expect("deserialization failed");
+        assert_eq!(msg, restored);
     }
 }

@@ -2,58 +2,101 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Classifies the magnitude and direction of a size change between two scan
-/// sessions. Each variant carries a hex color string suitable for UI rendering.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SizeChange {
-    /// Size increased significantly (> 20 %).
+/// Classifies the direction and magnitude of a size change between scans.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum SizeChangeTrend {
+    /// The item is new (no previous scan data).
+    New,
+    /// The item has grown significantly.
     LargeIncrease,
-    /// Size increased moderately (5 – 20 %).
+    /// The item has grown slightly.
     SmallIncrease,
-    /// Size is essentially unchanged (< 5 % in either direction).
+    /// The item size is unchanged.
     Unchanged,
-    /// Size decreased moderately (5 – 20 %).
+    /// The item has shrunk slightly.
     SmallDecrease,
-    /// Size decreased significantly (> 20 %).
+    /// The item has shrunk significantly.
     LargeDecrease,
-    /// No previous size data is available for comparison.
-    Unknown,
+    /// The item no longer exists (deleted).
+    Deleted,
+}
+
+/// Represents the size change of a filesystem node between two scans,
+/// including a trend classification and a hex color for UI display.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SizeChange {
+    /// The absolute size delta in bytes (positive = grew, negative = shrank).
+    pub delta_bytes: i64,
+
+    /// The relative change as a percentage. `None` if there is no previous size.
+    pub delta_percent: Option<f64>,
+
+    /// The classified trend of the size change.
+    pub trend: SizeChangeTrend,
+
+    /// A hex color string (e.g. `"#FF5733"`) for rendering this change in the UI.
+    pub hex_color: String,
 }
 
 impl SizeChange {
-    /// Returns the hex color string associated with this classification.
-    ///
-    /// Colors follow a traffic-light convention:
-    /// - Red shades for increases (more disk usage).
-    /// - Green shades for decreases (less disk usage).
-    /// - Grey for unchanged or unknown.
-    pub fn hex_color(&self) -> &'static str {
-        match self {
-            SizeChange::LargeIncrease => "#D32F2F",
-            SizeChange::SmallIncrease => "#FF7043",
-            SizeChange::Unchanged => "#9E9E9E",
-            SizeChange::SmallDecrease => "#66BB6A",
-            SizeChange::LargeDecrease => "#2E7D32",
-            SizeChange::Unknown => "#BDBDBD",
+    /// Threshold in percent above which a change is considered "large".
+    const LARGE_THRESHOLD_PERCENT: f64 = 20.0;
+
+    /// Computes a `SizeChange` from a current size and an optional previous size.
+    pub fn compute(current: u64, previous: Option<u64>) -> Self {
+        match previous {
+            None => Self {
+                delta_bytes: current as i64,
+                delta_percent: None,
+                trend: SizeChangeTrend::New,
+                hex_color: Self::color_for(SizeChangeTrend::New).to_string(),
+            },
+            Some(prev) => {
+                let delta = current as i64 - prev as i64;
+                let percent = if prev == 0 {
+                    None
+                } else {
+                    Some((delta as f64 / prev as f64) * 100.0)
+                };
+
+                let trend = Self::classify(delta, percent);
+                Self {
+                    delta_bytes: delta,
+                    delta_percent: percent,
+                    trend,
+                    hex_color: Self::color_for(trend).to_string(),
+                }
+            }
         }
     }
 
-    /// Classifies a size change given the `current` and `previous` sizes in
-    /// bytes. Returns [`SizeChange::Unknown`] when `previous` is zero to
-    /// avoid division by zero.
-    pub fn classify(current: u64, previous: u64) -> Self {
-        if previous == 0 {
-            return SizeChange::Unknown;
+    /// Classifies the trend based on the delta and optional percentage.
+    fn classify(delta: i64, percent: Option<f64>) -> SizeChangeTrend {
+        if delta == 0 {
+            return SizeChangeTrend::Unchanged;
         }
 
-        let ratio = current as f64 / previous as f64;
+        match percent {
+            Some(p) if p > Self::LARGE_THRESHOLD_PERCENT => SizeChangeTrend::LargeIncrease,
+            Some(p) if p > 0.0 => SizeChangeTrend::SmallIncrease,
+            Some(p) if p < -Self::LARGE_THRESHOLD_PERCENT => SizeChangeTrend::LargeDecrease,
+            Some(p) if p < 0.0 => SizeChangeTrend::SmallDecrease,
+            None if delta > 0 => SizeChangeTrend::LargeIncrease,
+            None if delta < 0 => SizeChangeTrend::LargeDecrease,
+            _ => SizeChangeTrend::Unchanged,
+        }
+    }
 
-        match ratio {
-            r if r > 1.20 => SizeChange::LargeIncrease,
-            r if r > 1.05 => SizeChange::SmallIncrease,
-            r if r >= 0.95 => SizeChange::Unchanged,
-            r if r >= 0.80 => SizeChange::SmallDecrease,
-            _ => SizeChange::LargeDecrease,
+    /// Returns the canonical hex color for a given trend.
+    pub fn color_for(trend: SizeChangeTrend) -> &'static str {
+        match trend {
+            SizeChangeTrend::New => "#3498DB",          // Blue
+            SizeChangeTrend::LargeIncrease => "#E74C3C", // Red
+            SizeChangeTrend::SmallIncrease => "#E67E22", // Orange
+            SizeChangeTrend::Unchanged => "#95A5A6",     // Gray
+            SizeChangeTrend::SmallDecrease => "#2ECC71", // Light green
+            SizeChangeTrend::LargeDecrease => "#27AE60", // Dark green
+            SizeChangeTrend::Deleted => "#8E44AD",       // Purple
         }
     }
 }
@@ -63,47 +106,70 @@ mod tests {
     use super::*;
 
     #[test]
-    fn classify_large_increase() {
-        assert_eq!(SizeChange::classify(200, 100), SizeChange::LargeIncrease);
+    fn test_new_item() {
+        let change = SizeChange::compute(1024, None);
+        assert_eq!(change.trend, SizeChangeTrend::New);
+        assert_eq!(change.delta_bytes, 1024);
+        assert!(change.delta_percent.is_none());
+        assert_eq!(change.hex_color, "#3498DB");
     }
 
     #[test]
-    fn classify_small_increase() {
-        assert_eq!(SizeChange::classify(110, 100), SizeChange::SmallIncrease);
+    fn test_unchanged() {
+        let change = SizeChange::compute(1024, Some(1024));
+        assert_eq!(change.trend, SizeChangeTrend::Unchanged);
+        assert_eq!(change.delta_bytes, 0);
     }
 
     #[test]
-    fn classify_unchanged() {
-        assert_eq!(SizeChange::classify(100, 100), SizeChange::Unchanged);
+    fn test_large_increase() {
+        let change = SizeChange::compute(2000, Some(1000));
+        assert_eq!(change.trend, SizeChangeTrend::LargeIncrease);
+        assert!(change.delta_bytes > 0);
     }
 
     #[test]
-    fn classify_small_decrease() {
-        assert_eq!(SizeChange::classify(85, 100), SizeChange::SmallDecrease);
+    fn test_small_increase() {
+        let change = SizeChange::compute(1050, Some(1000));
+        assert_eq!(change.trend, SizeChangeTrend::SmallIncrease);
     }
 
     #[test]
-    fn classify_large_decrease() {
-        assert_eq!(SizeChange::classify(50, 100), SizeChange::LargeDecrease);
+    fn test_large_decrease() {
+        let change = SizeChange::compute(500, Some(1000));
+        assert_eq!(change.trend, SizeChangeTrend::LargeDecrease);
+        assert!(change.delta_bytes < 0);
     }
 
     #[test]
-    fn classify_unknown_when_previous_is_zero() {
-        assert_eq!(SizeChange::classify(100, 0), SizeChange::Unknown);
+    fn test_small_decrease() {
+        let change = SizeChange::compute(950, Some(1000));
+        assert_eq!(change.trend, SizeChangeTrend::SmallDecrease);
     }
 
     #[test]
-    fn hex_color_is_nonempty_for_all_variants() {
-        let variants = [
-            SizeChange::LargeIncrease,
-            SizeChange::SmallIncrease,
-            SizeChange::Unchanged,
-            SizeChange::SmallDecrease,
-            SizeChange::LargeDecrease,
-            SizeChange::Unknown,
+    fn test_color_for_all_trends() {
+        let trends = [
+            SizeChangeTrend::New,
+            SizeChangeTrend::LargeIncrease,
+            SizeChangeTrend::SmallIncrease,
+            SizeChangeTrend::Unchanged,
+            SizeChangeTrend::SmallDecrease,
+            SizeChangeTrend::LargeDecrease,
+            SizeChangeTrend::Deleted,
         ];
-        for v in &variants {
-            assert!(!v.hex_color().is_empty());
+        for trend in trends {
+            let color = SizeChange::color_for(trend);
+            assert!(color.starts_with('#'), "color for {trend:?} must start with '#'");
+            assert_eq!(color.len(), 7, "color for {trend:?} must be 7 chars");
         }
+    }
+
+    #[test]
+    fn test_serialization_roundtrip() {
+        let change = SizeChange::compute(2048, Some(1024));
+        let json = serde_json::to_string(&change).expect("serialization failed");
+        let restored: SizeChange = serde_json::from_str(&json).expect("deserialization failed");
+        assert_eq!(change, restored);
     }
 }

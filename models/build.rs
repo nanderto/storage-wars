@@ -1,8 +1,5 @@
 //! Build script for the models crate.
 //!
-//! No custom build steps are required; this file exists as a placeholder
-//! for future build-time code generation or feature detection.
-
-fn main() {
-    // No build-time steps required.
-}
+//! Currently a no-op. Reserved for future code generation or
+//! platform-specific configuration.
+fn main() {}

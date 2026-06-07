@@ -7,10 +7,10 @@ use serde::{Deserialize, Serialize};
 /// tree hierarchy.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DbNode {
-    /// Unique identifier for this node within the database.
+    /// Unique identifier for this node within a scan session.
     pub id: i64,
 
-    /// Identifier of the parent node; `None` for root nodes.
+    /// Identifier of the parent node. `None` for root nodes.
     pub parent_id: Option<i64>,
 
     /// Identifier of the scan session this node belongs to.
@@ -22,34 +22,34 @@ pub struct DbNode {
     /// Absolute path to the file or directory.
     pub path: String,
 
-    /// Size in bytes.
+    /// Total size in bytes.
     pub size: u64,
 
-    /// Size in bytes from the previous scan session, if available.
+    /// Size in bytes from the previous scan, if available.
     pub prev_size: Option<u64>,
 
-    /// Number of files under this node.
+    /// Number of files contained within this node.
     pub file_count: u64,
 
-    /// Number of sub-directories under this node.
+    /// Number of folders contained within this node.
     pub folder_count: u64,
-
-    /// Last modification timestamp as a Unix epoch second.
-    pub modified: Option<i64>,
 
     /// Whether this node represents a directory.
     pub is_dir: bool,
+
+    /// Last modification timestamp as a Unix timestamp (seconds).
+    pub modified_secs: Option<i64>,
 }
 
 impl DbNode {
-    /// Creates a new [`DbNode`] with the given identifiers, name, and path.
-    /// All numeric fields default to zero and optional fields to `None`.
+    /// Creates a new `DbNode` with the given identifiers and path information.
     pub fn new(
         id: i64,
         parent_id: Option<i64>,
         scan_id: i64,
         name: impl Into<String>,
         path: impl Into<String>,
+        size: u64,
         is_dir: bool,
     ) -> Self {
         Self {
@@ -58,13 +58,18 @@ impl DbNode {
             scan_id,
             name: name.into(),
             path: path.into(),
-            size: 0,
+            size,
             prev_size: None,
             file_count: 0,
             folder_count: 0,
-            modified: None,
             is_dir,
+            modified_secs: None,
         }
+    }
+
+    /// Returns `true` if this node is a root node (has no parent).
+    pub fn is_root(&self) -> bool {
+        self.parent_id.is_none()
     }
 }
 
@@ -73,12 +78,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn new_db_node_defaults_are_zero() {
-        let node = DbNode::new(1, None, 42, "root", "/", true);
+    fn test_new_db_node() {
+        let node = DbNode::new(1, None, 42, "root", "/", 0, true);
         assert_eq!(node.id, 1);
-        assert_eq!(node.parent_id, None);
+        assert!(node.parent_id.is_none());
         assert_eq!(node.scan_id, 42);
-        assert_eq!(node.size, 0);
         assert!(node.is_dir);
+        assert!(node.is_root());
+    }
+
+    #[test]
+    fn test_child_db_node() {
+        let node = DbNode::new(2, Some(1), 42, "docs", "/docs", 4096, true);
+        assert!(!node.is_root());
+        assert_eq!(node.parent_id, Some(1));
+    }
+
+    #[test]
+    fn test_serialization_roundtrip() {
+        let node = DbNode::new(5, Some(1), 10, "file.txt", "/file.txt", 256, false);
+        let json = serde_json::to_string(&node).expect("serialization failed");
+        let restored: DbNode = serde_json::from_str(&json).expect("deserialization failed");
+        assert_eq!(node, restored);
     }
 }
