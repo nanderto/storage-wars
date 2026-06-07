@@ -1,4 +1,4 @@
-/// Metadata for a single scan session.
+/// Metadata about a single scan session.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ScanMeta {
     pub id: i64,
@@ -7,7 +7,7 @@ pub struct ScanMeta {
     pub total_size: u64,
 }
 
-/// A node in the filesystem tree.
+/// Represents a node in the filesystem tree.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FsNode {
     pub name: String,
@@ -33,7 +33,7 @@ pub struct DbNode {
     pub is_dir: bool,
 }
 
-/// Information about a drive / volume.
+/// Information about a drive/volume.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DriveInfo {
     pub name: String,
@@ -42,7 +42,7 @@ pub struct DriveInfo {
     pub available_space: u64,
 }
 
-/// Wrapper around FsNode used for UI display purposes.
+/// FsNode wrapper for UI display with depth and expanded state.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiNode {
     pub node: FsNode,
@@ -51,7 +51,7 @@ pub struct UiNode {
     pub scan_progress: f64,
 }
 
-/// Represents a size delta with a classification and display color.
+/// Represents a size delta with classification and display color.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SizeChange {
     pub delta: i64,
