@@ -2,4 +2,3 @@
 members = [
     "crates/models",
 ]
-resolver = "2"
