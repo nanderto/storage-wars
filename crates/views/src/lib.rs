@@ -1,1 +1,0 @@
-// Placeholder – view layer will be implemented in a later task.
