@@ -1,12 +1,8 @@
 [workspace]
-members = ["crates/storage-wars"]
 resolver = "2"
-
-[profile.dev]
-opt-level = 0
-debug = true
-
-[profile.release]
-opt-level = 3
-lto = "thin"
-codegen-units = 1
+members = [
+    "crates/models",
+    "crates/tree_ops",
+    "crates/views",
+    "crates/storage-wars",
+]
