@@ -1,4 +1,4 @@
 --- a/Cargo.toml
 +++ b/Cargo.toml
-@@ members list (add "crates/views" to the members array)
+@@ workspace members
 +    "crates/views",
