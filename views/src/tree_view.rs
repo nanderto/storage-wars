@@ -1,370 +1,280 @@
-//! Hierarchical file tree view with columns, chevrons, icons, and progress bars.
+//! Tree view — hierarchical file list with columns, chevrons, icons, and progress bars.
 
 use gpui::{
-    div, px, Context, FocusHandle, Focusable, IntoElement, ParentElement, Render, Styled,
-    ViewContext,
+    div, px, AppContext, Div, FocusHandle, Focusable, IntoElement, ParentElement, Render, Styled,
+    Window,
 };
 
-use crate::theme::{Palette, SizeChange, TREE_INDENT_PX, TREE_ROW_HEIGHT_PX};
-
-/// A single node in the file tree.
-#[derive(Debug, Clone)]
-pub struct TreeNode {
-    pub id: u64,
-    pub name: String,
-    pub depth: usize,
-    pub is_dir: bool,
-    pub is_expanded: bool,
-    pub has_children: bool,
-    /// Size in bytes for the current scan.
-    pub size_bytes: u64,
-    /// Size in bytes from the previous scan, if available.
-    pub prev_size_bytes: Option<u64>,
-    /// Size of the parent directory (used to compute % Parent).
-    pub parent_size_bytes: u64,
-    pub file_count: u64,
-    pub folder_count: u64,
-    /// Last modified timestamp as a formatted string.
-    pub modified: String,
-}
-
-impl TreeNode {
-    /// Percentage of the parent directory's size occupied by this node.
-    pub fn percent_of_parent(&self) -> f64 {
-        if self.parent_size_bytes == 0 {
-            return 0.0;
-        }
-        (self.size_bytes as f64 / self.parent_size_bytes as f64) * 100.0
-    }
-
-    /// Percentage change compared to the previous scan.
-    pub fn percent_change(&self) -> Option<f64> {
-        let prev = self.prev_size_bytes?;
-        if prev == 0 {
-            return None;
-        }
-        Some(((self.size_bytes as f64 - prev as f64) / prev as f64) * 100.0)
-    }
-
-    /// Size change classification for coloring.
-    pub fn size_change(&self) -> SizeChange {
-        SizeChange::classify(self.prev_size_bytes, Some(self.size_bytes))
-    }
-}
+use crate::{
+    theme,
+    types::{format_bytes, SizeChange, TreeNode},
+};
 
 /// Column definitions for the tree view header.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Column {
-    Name,
-    PercentParent,
-    Size,
-    PrevSize,
-    PercentPrev,
-    Files,
-    Folders,
-    Modified,
-}
+const COLUMNS: &[(&str, f32)] = &[
+    ("Name", 280.0),
+    ("% Parent", 80.0),
+    ("Size", 100.0),
+    ("Prev Size", 100.0),
+    ("% Prev", 80.0),
+    ("Files", 70.0),
+    ("Folders", 70.0),
+    ("Modified", 140.0),
+];
 
-impl Column {
-    pub fn label(self) -> &'static str {
-        match self {
-            Column::Name => "Name",
-            Column::PercentParent => "% Parent",
-            Column::Size => "Size",
-            Column::PrevSize => "Prev Size",
-            Column::PercentPrev => "% Prev",
-            Column::Files => "Files",
-            Column::Folders => "Folders",
-            Column::Modified => "Modified",
-        }
-    }
-
-    pub fn min_width_px(self) -> f32 {
-        match self {
-            Column::Name => 200.0,
-            Column::PercentParent => 80.0,
-            Column::Size => 90.0,
-            Column::PrevSize => 90.0,
-            Column::PercentPrev => 80.0,
-            Column::Files => 70.0,
-            Column::Folders => 70.0,
-            Column::Modified => 130.0,
-        }
-    }
-
-    pub const ALL: &'static [Column] = &[
-        Column::Name,
-        Column::PercentParent,
-        Column::Size,
-        Column::PrevSize,
-        Column::PercentPrev,
-        Column::Files,
-        Column::Folders,
-        Column::Modified,
-    ];
-}
-
-/// Hierarchical file list view.
+/// Hierarchical file-system tree view.
 pub struct TreeView {
     focus_handle: FocusHandle,
     nodes: Vec<TreeNode>,
-    selected_id: Option<u64>,
-    sort_column: Column,
-    sort_ascending: bool,
+    selected_path: Option<String>,
 }
 
 impl TreeView {
-    pub fn new(cx: &mut ViewContext<Self>) -> Self {
+    pub fn new(nodes: Vec<TreeNode>, cx: &mut gpui::Context<Self>) -> Self {
         Self {
             focus_handle: cx.focus_handle(),
-            nodes: Vec::new(),
-            selected_id: None,
-            sort_column: Column::Size,
-            sort_ascending: false,
+            nodes,
+            selected_path: None,
         }
     }
 
-    /// Replaces the node list.
-    pub fn set_nodes(&mut self, nodes: Vec<TreeNode>, cx: &mut ViewContext<Self>) {
+    pub fn set_nodes(&mut self, nodes: Vec<TreeNode>) {
         self.nodes = nodes;
-        cx.notify();
     }
 
-    fn select_node(&mut self, id: u64, cx: &mut ViewContext<Self>) {
-        self.selected_id = Some(id);
-        cx.notify();
-    }
+    // ── rendering helpers ─────────────────────────────────────────────────────
 
-    fn toggle_sort(&mut self, column: Column, cx: &mut ViewContext<Self>) {
-        if self.sort_column == column {
-            self.sort_ascending = !self.sort_ascending;
-        } else {
-            self.sort_column = column;
-            self.sort_ascending = false;
-        }
-        cx.notify();
-    }
-
-    /// Renders the column header row.
-    fn render_header(&self, cx: &mut ViewContext<Self>) -> impl IntoElement {
-        let columns: Vec<_> = Column::ALL
+    fn render_header(&self) -> Div {
+        let cols: Vec<Div> = COLUMNS
             .iter()
-            .map(|&col| {
-                let is_sorted = self.sort_column == col;
-                let arrow = if is_sorted {
-                    if self.sort_ascending { " ▲" } else { " ▼" }
-                } else {
-                    ""
-                };
+            .map(|(label, width)| {
                 div()
                     .flex()
                     .items_center()
-                    .min_w(px(col.min_width_px()))
+                    .w(px(*width))
                     .h_full()
-                    .px(px(6.0))
+                    .px(px(theme::SPACING_SM))
+                    .text_color(theme::COLOR_TEXT_SECONDARY)
+                    .text_size(px(theme::FONT_SIZE_SM))
                     .border_r_1()
-                    .border_color(Palette::border())
-                    .cursor_pointer()
-                    .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _, cx| {
-                        this.toggle_sort(col, cx);
-                    }))
-                    .child(
-                        div()
-                            .text_color(if is_sorted {
-                                Palette::accent()
-                            } else {
-                                Palette::text_secondary()
-                            })
-                            .text_xs()
-                            .child(format!("{}{}", col.label(), arrow)),
-                    )
+                    .border_color(theme::COLOR_BORDER)
+                    .child(*label)
             })
             .collect();
 
         div()
             .flex()
             .flex_row()
+            .items_center()
             .w_full()
-            .h(px(TREE_ROW_HEIGHT_PX))
-            .bg(Palette::surface())
+            .h(px(theme::TREE_ROW_HEIGHT))
+            .bg(theme::COLOR_SURFACE)
             .border_b_1()
-            .border_color(Palette::border())
-            .children(columns)
+            .border_color(theme::COLOR_BORDER)
+            .children(cols)
     }
 
-    /// Renders a single tree row.
-    fn render_row(&self, node: &TreeNode, cx: &mut ViewContext<Self>) -> impl IntoElement {
-        let is_selected = self.selected_id == Some(node.id);
-        let indent = node.depth as f32 * TREE_INDENT_PX;
-        let size_change = node.size_change();
-        let bar_color = size_change.color();
-        let pct_parent = node.percent_of_parent().clamp(0.0, 100.0);
-        let node_id = node.id;
+    fn render_node(&self, node: &TreeNode) -> Div {
+        let indent = node.depth as f32 * theme::TREE_INDENT_PX;
+        let is_selected = self.selected_path.as_deref() == Some(&node.path);
 
-        // ── Name cell ──────────────────────────────────────────────────────
-        let chevron = if node.has_children {
+        let chevron = if node.is_dir {
             if node.is_expanded { "▾ " } else { "▸ " }
         } else {
             "  "
         };
+
         let icon = if node.is_dir { "📁 " } else { "📄 " };
 
-        let name_cell = div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .min_w(px(Column::Name.min_width_px()))
-            .h_full()
-            .px(px(6.0))
-            .border_r_1()
-            .border_color(Palette::border())
-            .child(div().w(px(indent)))
-            .child(
-                div()
-                    .text_color(Palette::text_secondary())
-                    .text_xs()
-                    .child(chevron),
-            )
-            .child(
-                div()
-                    .text_color(Palette::text_secondary())
-                    .text_xs()
-                    .child(icon),
-            )
-            .child(
-                div()
-                    .text_color(Palette::text_primary())
-                    .text_sm()
-                    .overflow_hidden()
-                    .child(node.name.clone()),
-            );
+        let size_change = SizeChange::from_pct(node.size_change_pct());
+        let bar_color = match size_change {
+            SizeChange::Increased => theme::COLOR_SIZE_INCREASED,
+            SizeChange::Decreased => theme::COLOR_SIZE_DECREASED,
+            SizeChange::Unchanged => theme::COLOR_SIZE_UNCHANGED,
+        };
 
-        // ── % Parent cell (progress bar) ───────────────────────────────────
-        let pct_parent_cell = div()
+        let pct_prev_text = match node.size_change_pct() {
+            Some(p) => format!("{:+.1}%", p),
+            None => "—".into(),
+        };
+
+        let prev_size_text = match node.prev_size_bytes {
+            Some(b) => format_bytes(b),
+            None => "—".into(),
+        };
+
+        div()
             .flex()
             .flex_row()
             .items_center()
-            .min_w(px(Column::PercentParent.min_width_px()))
-            .h_full()
-            .px(px(6.0))
-            .border_r_1()
-            .border_color(Palette::border())
+            .w_full()
+            .h(px(theme::TREE_ROW_HEIGHT))
+            .bg(if is_selected {
+                theme::COLOR_SELECTED
+            } else {
+                theme::COLOR_BACKGROUND
+            })
+            .border_b_1()
+            .border_color(theme::COLOR_BORDER)
+            // Name column
             .child(
                 div()
                     .flex()
                     .flex_row()
                     .items_center()
-                    .w_full()
-                    .h(px(10.0))
-                    .bg(Palette::progress_track())
-                    .rounded(px(2.0))
+                    .w(px(COLUMNS[0].1))
+                    .h_full()
+                    .px(px(theme::SPACING_SM))
+                    .pl(px(theme::SPACING_SM + indent))
+                    .text_color(theme::COLOR_TEXT_PRIMARY)
+                    .text_size(px(theme::FONT_SIZE_SM))
                     .overflow_hidden()
-                    .child(
-                        div()
-                            .h_full()
-                            .w(gpui::relative(pct_parent as f32 / 100.0))
-                            .bg(bar_color)
-                            .rounded(px(2.0)),
-                    ),
-            );
-
-        // ── Numeric cells ──────────────────────────────────────────────────
-        let size_cell = self.numeric_cell(
-            &crate::drive_selector::format_bytes(node.size_bytes),
-            Column::Size,
-        );
-        let prev_size_cell = self.numeric_cell(
-            &node
-                .prev_size_bytes
-                .map(crate::drive_selector::format_bytes)
-                .unwrap_or_else(|| "—".to_string()),
-            Column::PrevSize,
-        );
-        let pct_prev_cell = self.numeric_cell(
-            &node
-                .percent_change()
-                .map(|p| format!("{:+.1}%", p))
-                .unwrap_or_else(|| "—".to_string()),
-            Column::PercentPrev,
-        );
-        let files_cell = self.numeric_cell(&node.file_count.to_string(), Column::Files);
-        let folders_cell = self.numeric_cell(&node.folder_count.to_string(), Column::Folders);
-        let modified_cell = self.numeric_cell(&node.modified, Column::Modified);
-
-        div()
-            .flex()
-            .flex_row()
-            .w_full()
-            .h(px(TREE_ROW_HEIGHT_PX))
-            .bg(if is_selected {
-                Palette::selection()
-            } else {
-                Palette::background()
-            })
-            .hover(|s| s.bg(Palette::surface()))
-            .border_b_1()
-            .border_color(Palette::border())
-            .cursor_pointer()
-            .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _, cx| {
-                this.select_node(node_id, cx);
-            }))
-            .child(name_cell)
-            .child(pct_parent_cell)
-            .child(size_cell)
-            .child(prev_size_cell)
-            .child(pct_prev_cell)
-            .child(files_cell)
-            .child(folders_cell)
-            .child(modified_cell)
-    }
-
-    fn numeric_cell(&self, text: &str, column: Column) -> impl IntoElement {
-        div()
-            .flex()
-            .items_center()
-            .justify_end()
-            .min_w(px(column.min_width_px()))
-            .h_full()
-            .px(px(6.0))
-            .border_r_1()
-            .border_color(Palette::border())
+                    .child(format!("{}{}{}", chevron, icon, node.name)),
+            )
+            // % Parent column — progress bar
             .child(
                 div()
-                    .text_color(Palette::text_secondary())
-                    .text_sm()
-                    .child(text.to_string()),
+                    .flex()
+                    .flex_col()
+                    .justify_center()
+                    .w(px(COLUMNS[1].1))
+                    .h_full()
+                    .px(px(theme::SPACING_SM))
+                    .child(
+                        div()
+                            .w_full()
+                            .h(px(theme::PROGRESS_BAR_HEIGHT))
+                            .rounded(px(2.0))
+                            .bg(theme::COLOR_SURFACE_RAISED)
+                            .child(
+                                div()
+                                    .h_full()
+                                    .w(px(COLUMNS[1].1 * node.parent_fraction.clamp(0.0, 1.0)
+                                        - theme::SPACING_SM * 2.0))
+                                    .rounded(px(2.0))
+                                    .bg(bar_color),
+                            ),
+                    ),
+            )
+            // Size column
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .w(px(COLUMNS[2].1))
+                    .h_full()
+                    .px(px(theme::SPACING_SM))
+                    .text_color(theme::COLOR_TEXT_PRIMARY)
+                    .text_size(px(theme::FONT_SIZE_SM))
+                    .child(format_bytes(node.size_bytes)),
+            )
+            // Prev Size column
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .w(px(COLUMNS[3].1))
+                    .h_full()
+                    .px(px(theme::SPACING_SM))
+                    .text_color(theme::COLOR_TEXT_SECONDARY)
+                    .text_size(px(theme::FONT_SIZE_SM))
+                    .child(prev_size_text),
+            )
+            // % Prev column
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .w(px(COLUMNS[4].1))
+                    .h_full()
+                    .px(px(theme::SPACING_SM))
+                    .text_color(match size_change {
+                        SizeChange::Increased => theme::COLOR_SIZE_INCREASED,
+                        SizeChange::Decreased => theme::COLOR_SIZE_DECREASED,
+                        SizeChange::Unchanged => theme::COLOR_TEXT_MUTED,
+                    })
+                    .text_size(px(theme::FONT_SIZE_SM))
+                    .child(pct_prev_text),
+            )
+            // Files column
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .w(px(COLUMNS[5].1))
+                    .h_full()
+                    .px(px(theme::SPACING_SM))
+                    .text_color(theme::COLOR_TEXT_SECONDARY)
+                    .text_size(px(theme::FONT_SIZE_SM))
+                    .child(node.file_count.to_string()),
+            )
+            // Folders column
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .w(px(COLUMNS[6].1))
+                    .h_full()
+                    .px(px(theme::SPACING_SM))
+                    .text_color(theme::COLOR_TEXT_SECONDARY)
+                    .text_size(px(theme::FONT_SIZE_SM))
+                    .child(node.folder_count.to_string()),
+            )
+            // Modified column
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .w(px(COLUMNS[7].1))
+                    .h_full()
+                    .px(px(theme::SPACING_SM))
+                    .text_color(theme::COLOR_TEXT_MUTED)
+                    .text_size(px(theme::FONT_SIZE_SM))
+                    .child(node.modified.clone().unwrap_or_else(|| "—".into())),
             )
     }
-}
 
-impl Focusable for TreeView {
-    fn focus_handle(&self, _cx: &gpui::AppContext) -> FocusHandle {
-        self.focus_handle.clone()
+    /// Flatten the tree into a depth-first ordered list of visible nodes.
+    fn visible_nodes<'a>(nodes: &'a [TreeNode]) -> Vec<&'a TreeNode> {
+        let mut result = Vec::new();
+        for node in nodes {
+            result.push(node);
+            if node.is_expanded && node.is_dir {
+                let children = Self::visible_nodes(&node.children);
+                result.extend(children);
+            }
+        }
+        result
     }
 }
 
 impl Render for TreeView {
-    fn render(&mut self, cx: &mut ViewContext<Self>) -> impl IntoElement {
-        let rows: Vec<_> = self
-            .nodes
-            .clone()
-            .iter()
-            .map(|node| self.render_row(node, cx))
-            .collect();
+    fn render(&mut self, _window: &mut Window, _cx: &mut gpui::Context<Self>) -> impl IntoElement {
+        let visible = Self::visible_nodes(&self.nodes);
+        let rows: Vec<Div> = visible.iter().map(|n| self.render_node(n)).collect();
 
         div()
             .flex()
             .flex_col()
-            .size_full()
-            .overflow_hidden()
-            .child(self.render_header(cx))
+            .w_full()
+            .h_full()
+            .bg(theme::COLOR_BACKGROUND)
+            .track_focus(&self.focus_handle)
+            .child(self.render_header())
             .child(
                 div()
                     .flex()
                     .flex_col()
                     .flex_1()
+                    .w_full()
                     .overflow_y_scroll()
                     .children(rows),
             )
+    }
+}
+
+impl Focusable for TreeView {
+    fn focus_handle(&self, _cx: &AppContext) -> FocusHandle {
+        self.focus_handle.clone()
     }
 }

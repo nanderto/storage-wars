@@ -1,2 +1,1 @@
-# Clippy configuration for the views crate.
 msrv = "1.75.0"

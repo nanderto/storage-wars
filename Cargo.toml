@@ -1,3 +1,5 @@
 [workspace]
-members = ["crates/storage-wars"]
+members = [
+    "views",
+]
 resolver = "2"

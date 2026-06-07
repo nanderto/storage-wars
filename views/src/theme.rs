@@ -1,165 +1,61 @@
-//! Color theme and styling constants for the views component.
+//! Design tokens — colours, spacing, typography used across all view components.
 
-use gpui::{Hsla, Rgba, hsla, rgb};
+use gpui::{rgb, Rgba};
 
-/// Size change classification used for progress bar coloring.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SizeChange {
-    /// Item is new (did not exist in previous scan).
-    New,
-    /// Item grew significantly.
-    Grown,
-    /// Item is roughly the same size.
-    Unchanged,
-    /// Item shrank significantly.
-    Shrunk,
-    /// Item was deleted (does not exist in current scan).
-    Deleted,
-}
+// ── Palette ──────────────────────────────────────────────────────────────────
 
-impl SizeChange {
-    /// Returns the HSLA color associated with this size change variant.
-    pub fn color(self) -> Hsla {
-        match self {
-            SizeChange::New => hsla(0.33, 0.65, 0.45, 1.0),      // green
-            SizeChange::Grown => hsla(0.08, 0.85, 0.55, 1.0),    // orange-red
-            SizeChange::Unchanged => hsla(0.60, 0.20, 0.55, 1.0), // muted blue
-            SizeChange::Shrunk => hsla(0.55, 0.55, 0.50, 1.0),   // teal
-            SizeChange::Deleted => hsla(0.0, 0.70, 0.45, 1.0),   // red
-        }
-    }
+pub const COLOR_BACKGROUND: Rgba = rgb(0x1E1E2E);
+pub const COLOR_SURFACE: Rgba = rgb(0x27273A);
+pub const COLOR_SURFACE_RAISED: Rgba = rgb(0x313145);
+pub const COLOR_BORDER: Rgba = rgb(0x45455F);
+pub const COLOR_TEXT_PRIMARY: Rgba = rgb(0xCDD6F4);
+pub const COLOR_TEXT_SECONDARY: Rgba = rgb(0x9399B2);
+pub const COLOR_TEXT_MUTED: Rgba = rgb(0x6C7086);
+pub const COLOR_ACCENT: Rgba = rgb(0x89B4FA);
+pub const COLOR_ACCENT_HOVER: Rgba = rgb(0xB4D0FF);
+pub const COLOR_SELECTED: Rgba = rgb(0x313F5A);
+pub const COLOR_SELECTED_BORDER: Rgba = rgb(0x89B4FA);
 
-    /// Classifies a size change given old and new byte counts.
-    ///
-    /// # Arguments
-    /// * `old` – previous scan size in bytes (`None` if item is new).
-    /// * `new` – current scan size in bytes (`None` if item was deleted).
-    pub fn classify(old: Option<u64>, new: Option<u64>) -> Self {
-        match (old, new) {
-            (None, Some(_)) => SizeChange::New,
-            (Some(_), None) => SizeChange::Deleted,
-            (Some(o), Some(n)) => {
-                if o == 0 && n == 0 {
-                    return SizeChange::Unchanged;
-                }
-                let ratio = if o == 0 {
-                    f64::INFINITY
-                } else {
-                    n as f64 / o as f64
-                };
-                if ratio > 1.10 {
-                    SizeChange::Grown
-                } else if ratio < 0.90 {
-                    SizeChange::Shrunk
-                } else {
-                    SizeChange::Unchanged
-                }
-            }
-            (None, None) => SizeChange::Unchanged,
-        }
-    }
-}
+/// Progress bar / size-change colours.
+pub const COLOR_SIZE_INCREASED: Rgba = rgb(0xF38BA8);
+pub const COLOR_SIZE_DECREASED: Rgba = rgb(0xA6E3A1);
+pub const COLOR_SIZE_UNCHANGED: Rgba = rgb(0x89B4FA);
 
-/// Application-wide color palette.
-pub struct Palette;
+pub const COLOR_BUTTON_BG: Rgba = rgb(0x313145);
+pub const COLOR_BUTTON_BG_HOVER: Rgba = rgb(0x45455F);
+pub const COLOR_BUTTON_DANGER: Rgba = rgb(0xF38BA8);
+pub const COLOR_BUTTON_DANGER_HOVER: Rgba = rgb(0xFAA8B8);
 
-impl Palette {
-    pub fn background() -> Hsla {
-        hsla(0.0, 0.0, 0.12, 1.0)
-    }
+pub const COLOR_TITLE_BAR_BG: Rgba = rgb(0x181825);
+pub const COLOR_WINDOW_CONTROL_CLOSE: Rgba = rgb(0xF38BA8);
+pub const COLOR_WINDOW_CONTROL_MINIMIZE: Rgba = rgb(0xF9E2AF);
+pub const COLOR_WINDOW_CONTROL_MAXIMIZE: Rgba = rgb(0xA6E3A1);
 
-    pub fn surface() -> Hsla {
-        hsla(0.0, 0.0, 0.16, 1.0)
-    }
+// ── Spacing ───────────────────────────────────────────────────────────────────
 
-    pub fn surface_elevated() -> Hsla {
-        hsla(0.0, 0.0, 0.20, 1.0)
-    }
+pub const SPACING_XS: f32 = 4.0;
+pub const SPACING_SM: f32 = 8.0;
+pub const SPACING_MD: f32 = 12.0;
+pub const SPACING_LG: f32 = 16.0;
+pub const SPACING_XL: f32 = 24.0;
 
-    pub fn border() -> Hsla {
-        hsla(0.0, 0.0, 0.28, 1.0)
-    }
-
-    pub fn text_primary() -> Hsla {
-        hsla(0.0, 0.0, 0.92, 1.0)
-    }
-
-    pub fn text_secondary() -> Hsla {
-        hsla(0.0, 0.0, 0.65, 1.0)
-    }
-
-    pub fn text_muted() -> Hsla {
-        hsla(0.0, 0.0, 0.45, 1.0)
-    }
-
-    pub fn accent() -> Hsla {
-        hsla(0.60, 0.70, 0.55, 1.0)
-    }
-
-    pub fn accent_hover() -> Hsla {
-        hsla(0.60, 0.70, 0.65, 1.0)
-    }
-
-    pub fn selection() -> Hsla {
-        hsla(0.60, 0.50, 0.35, 0.50)
-    }
-
-    pub fn progress_track() -> Hsla {
-        hsla(0.0, 0.0, 0.25, 1.0)
-    }
-
-    pub fn title_bar() -> Hsla {
-        hsla(0.0, 0.0, 0.10, 1.0)
-    }
-}
-
-/// Indentation width per depth level in the tree view (pixels).
+/// Indentation per depth level in the tree view (px).
 pub const TREE_INDENT_PX: f32 = 16.0;
 
-/// Width of the scan history panel (pixels).
-pub const SCAN_HISTORY_WIDTH_PX: f32 = 280.0;
+/// Fixed width of the scan-history panel (px).
+pub const SCAN_HISTORY_WIDTH: f32 = 280.0;
 
-/// Height of a single row in the tree view (pixels).
-pub const TREE_ROW_HEIGHT_PX: f32 = 24.0;
+// ── Typography ────────────────────────────────────────────────────────────────
 
-/// Height of the custom title bar (pixels).
-pub const TITLE_BAR_HEIGHT_PX: f32 = 36.0;
+pub const FONT_SIZE_SM: f32 = 12.0;
+pub const FONT_SIZE_MD: f32 = 14.0;
+pub const FONT_SIZE_LG: f32 = 16.0;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+// ── Dimensions ────────────────────────────────────────────────────────────────
 
-    #[test]
-    fn classify_new_item() {
-        assert_eq!(SizeChange::classify(None, Some(1024)), SizeChange::New);
-    }
-
-    #[test]
-    fn classify_deleted_item() {
-        assert_eq!(SizeChange::classify(Some(1024), None), SizeChange::Deleted);
-    }
-
-    #[test]
-    fn classify_grown_item() {
-        assert_eq!(
-            SizeChange::classify(Some(1000), Some(1200)),
-            SizeChange::Grown
-        );
-    }
-
-    #[test]
-    fn classify_shrunk_item() {
-        assert_eq!(
-            SizeChange::classify(Some(1000), Some(800)),
-            SizeChange::Shrunk
-        );
-    }
-
-    #[test]
-    fn classify_unchanged_item() {
-        assert_eq!(
-            SizeChange::classify(Some(1000), Some(1000)),
-            SizeChange::Unchanged
-        );
-    }
-}
+pub const TITLE_BAR_HEIGHT: f32 = 32.0;
+pub const DRIVE_SELECTOR_HEIGHT: f32 = 36.0;
+pub const TREE_ROW_HEIGHT: f32 = 28.0;
+pub const HISTORY_ROW_HEIGHT: f32 = 48.0;
+pub const WINDOW_CONTROL_SIZE: f32 = 12.0;
+pub const PROGRESS_BAR_HEIGHT: f32 = 6.0;
