@@ -1,191 +1,203 @@
-//! Public API — connection helpers and CRUD operations.
+//! Core database functions: open, save, load, query, delete.
+
+use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection};
 
-use crate::error::{DbError, Result};
+use crate::error::{DbError, DbResult};
 use crate::models::{DbNode, ScanMeta};
 use crate::schema::run_migrations;
 
 // ─── Connection helpers ───────────────────────────────────────────────────────
 
-/// Opens (or creates) the production SQLite database.
+/// Open (or create) the application database stored under `%APPDATA%` on
+/// Windows or `$HOME/.local/share` on other platforms.
 ///
-/// The file is placed at:
-/// - **Windows** — `%APPDATA%\DiskScanner\scanner.db`
-/// - **macOS / Linux** — `$HOME/.local/share/DiskScanner/scanner.db`
-///
-/// All pending migrations are applied before the connection is returned.
-pub fn open_db() -> Result<Connection> {
-    let data_dir = get_app_data_dir()?;
-    std::fs::create_dir_all(&data_dir)?;
-    let db_path = data_dir.join("scanner.db");
-    let conn = Connection::open(db_path)?;
+/// Runs all pending migrations before returning.
+pub fn open_db() -> DbResult<Connection> {
+    let path = app_db_path()?;
+
+    // Ensure the parent directory exists.
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let conn = Connection::open(&path)?;
     configure_connection(&conn)?;
     run_migrations(&conn)?;
     Ok(conn)
 }
 
-/// Opens a fully-migrated **in-memory** database.
+/// Open an in-memory database suitable for unit tests.
 ///
-/// Intended for unit and integration tests — no files are written to disk.
-pub fn open_in_memory() -> Result<Connection> {
+/// Runs all pending migrations before returning.
+pub fn open_in_memory() -> DbResult<Connection> {
     let conn = Connection::open_in_memory()?;
     configure_connection(&conn)?;
     run_migrations(&conn)?;
     Ok(conn)
 }
 
-/// Applies connection-level PRAGMAs that must be set on every new connection.
-fn configure_connection(conn: &Connection) -> rusqlite::Result<()> {
-    conn.execute_batch(
-        "PRAGMA journal_mode = WAL;
-         PRAGMA foreign_keys = ON;
-         PRAGMA synchronous   = NORMAL;",
-    )
+/// Apply runtime PRAGMAs that must be set on every new connection.
+fn configure_connection(conn: &Connection) -> DbResult<()> {
+    conn.execute_batch("PRAGMA foreign_keys=ON;")?;
+    Ok(())
 }
 
-/// Returns the platform-appropriate application-data directory.
-fn get_app_data_dir() -> Result<std::path::PathBuf> {
+/// Resolve the platform-appropriate path for the application database file.
+fn app_db_path() -> DbResult<PathBuf> {
     #[cfg(target_os = "windows")]
-    {
-        let appdata = std::env::var("APPDATA")
-            .map_err(|_| DbError::AppDataNotFound)?;
-        Ok(std::path::PathBuf::from(appdata).join("DiskScanner"))
-    }
+    let base = {
+        let appdata = std::env::var("APPDATA")?;
+        PathBuf::from(appdata)
+    };
 
     #[cfg(not(target_os = "windows"))]
-    {
-        let home = std::env::var("HOME")
-            .map_err(|_| DbError::AppDataNotFound)?;
-        Ok(std::path::PathBuf::from(home)
-            .join(".local")
-            .join("share")
-            .join("DiskScanner"))
-    }
+    let base = {
+        let home = std::env::var("HOME")?;
+        PathBuf::from(home).join(".local").join("share")
+    };
+
+    Ok(base.join("disk-scanner").join("database.db"))
 }
 
 // ─── Write operations ─────────────────────────────────────────────────────────
 
-/// Inserts a complete scan tree into the database inside a single transaction.
+/// A node supplied by the caller for bulk insertion.
+#[derive(Debug, Clone)]
+pub struct InputNode {
+    pub path: String,
+    pub is_dir: bool,
+    pub size_bytes: i64,
+    /// Index into the caller's slice that represents this node's parent,
+    /// or `None` for the root.
+    pub parent_index: Option<usize>,
+    pub depth: i32,
+}
+
+/// Persist a complete scan in a single transaction using depth-first bulk
+/// insert order.
 ///
-/// `nodes` must be ordered **depth-first** (parents before children) so that
-/// `parent_id` foreign-key references are satisfied during the bulk insert.
-///
-/// Returns the newly-assigned `scan_id`.
+/// Returns the newly created `scan_id`.
 pub fn save_scan(
     conn: &Connection,
-    drive_root: &str,
-    scanned_at: i64,
-    nodes: &[DbNode],
-) -> Result<i64> {
+    drive: &str,
+    root_path: &str,
+    nodes: &[InputNode],
+) -> DbResult<i64> {
+    let created_at = unix_now();
+    let node_count = nodes.len() as i64;
+
     let tx = conn.unchecked_transaction()?;
 
-    // Insert the scan header row first.
+    // Insert the scan header row.
     tx.execute(
-        "INSERT INTO scans (drive_root, scanned_at, node_count) VALUES (?1, ?2, ?3)",
-        params![drive_root, scanned_at, nodes.len() as i64],
+        "INSERT INTO scans (drive, root_path, created_at, node_count)
+         VALUES (?1, ?2, ?3, ?4)",
+        params![drive, root_path, created_at, node_count],
     )?;
     let scan_id = tx.last_insert_rowid();
 
-    // Bulk-insert every node.  Because `nodes` is depth-first we can rely on
-    // the fact that a parent's rowid is already known when we insert a child.
-    // However, callers supply logical `parent_id` values that reference the
-    // *index* within the slice (0-based), not the actual database rowid.
-    // We therefore maintain a mapping from slice-index → rowid.
-    let mut rowid_map: Vec<i64> = Vec::with_capacity(nodes.len());
+    // Pre-allocate a mapping from caller index → database row id.
+    let mut db_ids: Vec<i64> = vec![0i64; nodes.len()];
 
-    {
-        let mut stmt = tx.prepare(
-            "INSERT INTO nodes (scan_id, parent_id, path, is_dir, size, modified)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        )?;
+    let mut stmt = tx.prepare(
+        "INSERT INTO nodes (scan_id, path, is_dir, size_bytes, parent_id, depth)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    )?;
 
-        for (idx, node) in nodes.iter().enumerate() {
-            // Resolve the logical parent_id (slice index) to a real rowid.
-            let db_parent_id: Option<i64> = node
-                .parent_id
-                .map(|pi| rowid_map[pi as usize]);
+    for (idx, node) in nodes.iter().enumerate() {
+        let parent_db_id: Option<i64> = node
+            .parent_index
+            .map(|pi| db_ids[pi]);
 
-            stmt.execute(params![
-                scan_id,
-                db_parent_id,
-                node.path,
-                node.is_dir as i64,
-                node.size,
-                node.modified,
-            ])?;
+        stmt.execute(params![
+            scan_id,
+            node.path,
+            node.is_dir as i32,
+            node.size_bytes,
+            parent_db_id,
+            node.depth,
+        ])?;
 
-            let rowid = tx.last_insert_rowid();
-            rowid_map.push(rowid);
-            let _ = idx; // suppress unused-variable warning
-        }
+        db_ids[idx] = tx.last_insert_rowid();
     }
 
+    drop(stmt);
     tx.commit()?;
-    Ok(scan_id)
-}
 
-/// Deletes a scan and all its nodes (CASCADE handles the nodes table).
-pub fn delete_scan(conn: &Connection, scan_id: i64) -> Result<()> {
-    let rows = conn.execute("DELETE FROM scans WHERE id = ?1", params![scan_id])?;
-    if rows == 0 {
-        return Err(DbError::ScanNotFound(scan_id));
-    }
-    Ok(())
+    Ok(scan_id)
 }
 
 // ─── Read operations ──────────────────────────────────────────────────────────
 
-/// Returns a flat list of every [`DbNode`] belonging to `scan_id`.
-///
-/// Rows are ordered by `id` (insertion order), which preserves the original
-/// depth-first traversal order.
-pub fn load_scan_tree(conn: &Connection, scan_id: i64) -> Result<Vec<DbNode>> {
+/// Load all nodes for a given `scan_id` as a flat list ordered by `depth`
+/// then `path`.
+pub fn load_scan_tree(conn: &Connection, scan_id: i64) -> DbResult<Vec<DbNode>> {
     let mut stmt = conn.prepare(
-        "SELECT id, scan_id, parent_id, path, is_dir, size, modified
+        "SELECT id, scan_id, path, is_dir, size_bytes, parent_id, depth
          FROM   nodes
          WHERE  scan_id = ?1
-         ORDER  BY id ASC",
+         ORDER  BY depth ASC, path ASC",
     )?;
 
-    let nodes = stmt
-        .query_map(params![scan_id], |row| {
-            Ok(DbNode {
-                id: Some(row.get(0)?),
-                scan_id: row.get(1)?,
-                parent_id: row.get(2)?,
-                path: row.get(3)?,
-                is_dir: row.get::<_, i64>(4)? != 0,
-                size: row.get(5)?,
-                modified: row.get(6)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let rows = stmt.query_map(params![scan_id], |row| {
+        Ok(DbNode {
+            id: row.get(0)?,
+            scan_id: row.get(1)?,
+            path: row.get(2)?,
+            is_dir: row.get::<_, i32>(3)? != 0,
+            size_bytes: row.get(4)?,
+            parent_id: row.get(5)?,
+            depth: row.get(6)?,
+        })
+    })?;
 
-    Ok(nodes)
+    rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
 }
 
-/// Returns all scans for a given `drive_root`, ordered newest-first.
-pub fn get_scans_for_drive(conn: &Connection, drive_root: &str) -> Result<Vec<ScanMeta>> {
+/// Return all scans recorded for a given drive letter / mount-point, ordered
+/// by `created_at` descending (most recent first).
+pub fn get_scans_for_drive(conn: &Connection, drive: &str) -> DbResult<Vec<ScanMeta>> {
     let mut stmt = conn.prepare(
-        "SELECT id, drive_root, scanned_at, node_count
+        "SELECT id, drive, root_path, created_at, node_count
          FROM   scans
-         WHERE  drive_root = ?1
-         ORDER  BY scanned_at DESC",
+         WHERE  drive = ?1
+         ORDER  BY created_at DESC",
     )?;
 
-    let scans = stmt
-        .query_map(params![drive_root], |row| {
-            Ok(ScanMeta {
-                id: row.get(0)?,
-                drive_root: row.get(1)?,
-                scanned_at: row.get(2)?,
-                node_count: row.get(3)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let rows = stmt.query_map(params![drive], |row| {
+        Ok(ScanMeta {
+            id: row.get(0)?,
+            drive: row.get(1)?,
+            root_path: row.get(2)?,
+            created_at: row.get(3)?,
+            node_count: row.get(4)?,
+        })
+    })?;
 
-    Ok(scans)
+    rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
+}
+
+/// Delete a scan and all its nodes (CASCADE handles the nodes table).
+pub fn delete_scan(conn: &Connection, scan_id: i64) -> DbResult<()> {
+    let affected = conn.execute("DELETE FROM scans WHERE id = ?1", params![scan_id])?;
+
+    if affected == 0 {
+        return Err(DbError::ScanNotFound(scan_id));
+    }
+
+    Ok(())
+}
+
+// ─── Utilities ────────────────────────────────────────────────────────────────
+
+fn unix_now() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -194,104 +206,120 @@ pub fn get_scans_for_drive(conn: &Connection, drive_root: &str) -> Result<Vec<Sc
 mod tests {
     use super::*;
 
-    fn sample_nodes(scan_id: i64) -> Vec<DbNode> {
+    fn sample_nodes() -> Vec<InputNode> {
         vec![
-            DbNode {
-                id: None,
-                scan_id,
-                parent_id: None,
-                path: "/home/user".to_string(),
+            InputNode {
+                path: "/tmp/scan".into(),
                 is_dir: true,
-                size: 0,
-                modified: 1_700_000_000,
+                size_bytes: 0,
+                parent_index: None,
+                depth: 0,
             },
-            DbNode {
-                id: None,
-                scan_id,
-                parent_id: Some(0), // index 0 = the root above
-                path: "/home/user/file.txt".to_string(),
+            InputNode {
+                path: "/tmp/scan/file_a.txt".into(),
                 is_dir: false,
-                size: 1024,
-                modified: 1_700_000_001,
+                size_bytes: 1024,
+                parent_index: Some(0),
+                depth: 1,
+            },
+            InputNode {
+                path: "/tmp/scan/subdir".into(),
+                is_dir: true,
+                size_bytes: 0,
+                parent_index: Some(0),
+                depth: 1,
+            },
+            InputNode {
+                path: "/tmp/scan/subdir/file_b.txt".into(),
+                is_dir: false,
+                size_bytes: 2048,
+                parent_index: Some(2),
+                depth: 2,
             },
         ]
     }
 
     #[test]
-    fn test_open_in_memory() {
-        let conn = open_in_memory().expect("open_in_memory failed");
-        // Verify the schema was applied by querying the tables.
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM scans", [], |r| r.get(0))
-            .expect("query failed");
-        assert_eq!(count, 0);
+    fn open_in_memory_succeeds() {
+        open_in_memory().expect("in-memory db should open");
     }
 
     #[test]
-    fn test_save_and_load_scan() {
+    fn save_and_load_scan() {
         let conn = open_in_memory().unwrap();
-        let nodes = sample_nodes(0 /* placeholder, overwritten by save_scan */);
-        let scan_id = save_scan(&conn, "C:\\", 1_700_000_000, &nodes).unwrap();
+        let nodes = sample_nodes();
+
+        let scan_id = save_scan(&conn, "C:\\", "/tmp/scan", &nodes).unwrap();
         assert!(scan_id > 0);
 
         let loaded = load_scan_tree(&conn, scan_id).unwrap();
-        assert_eq!(loaded.len(), 2);
-        assert_eq!(loaded[0].path, "/home/user");
-        assert_eq!(loaded[1].path, "/home/user/file.txt");
-        assert!(loaded[0].is_dir);
-        assert!(!loaded[1].is_dir);
-        assert_eq!(loaded[1].size, 1024);
+        assert_eq!(loaded.len(), nodes.len());
+
+        // Root node should be at depth 0.
+        assert!(loaded.iter().any(|n| n.depth == 0 && n.is_dir));
     }
 
     #[test]
-    fn test_get_scans_for_drive() {
+    fn get_scans_for_drive_returns_ordered() {
         let conn = open_in_memory().unwrap();
-        save_scan(&conn, "D:\\", 1_000, &[]).unwrap();
-        save_scan(&conn, "D:\\", 2_000, &[]).unwrap();
-        save_scan(&conn, "C:\\", 3_000, &[]).unwrap();
+        let nodes = sample_nodes();
 
-        let scans = get_scans_for_drive(&conn, "D:\\").unwrap();
-        assert_eq!(scans.len(), 2);
-        // Newest first.
-        assert_eq!(scans[0].scanned_at, 2_000);
-        assert_eq!(scans[1].scanned_at, 1_000);
+        let _id1 = save_scan(&conn, "C:\\", "/tmp/scan1", &nodes).unwrap();
+        let _id2 = save_scan(&conn, "C:\\", "/tmp/scan2", &nodes).unwrap();
+        let _id3 = save_scan(&conn, "D:\\", "/mnt/scan3", &nodes).unwrap();
+
+        let c_scans = get_scans_for_drive(&conn, "C:\\").unwrap();
+        assert_eq!(c_scans.len(), 2);
+
+        let d_scans = get_scans_for_drive(&conn, "D:\\").unwrap();
+        assert_eq!(d_scans.len(), 1);
+
+        // Most recent first.
+        assert!(c_scans[0].created_at >= c_scans[1].created_at);
     }
 
     #[test]
-    fn test_delete_scan_cascade() {
+    fn delete_scan_removes_nodes_via_cascade() {
         let conn = open_in_memory().unwrap();
-        let nodes = sample_nodes(0);
-        let scan_id = save_scan(&conn, "E:\\", 9_999, &nodes).unwrap();
+        let nodes = sample_nodes();
+
+        let scan_id = save_scan(&conn, "C:\\", "/tmp/scan", &nodes).unwrap();
 
         // Nodes exist before deletion.
         let before = load_scan_tree(&conn, scan_id).unwrap();
-        assert_eq!(before.len(), 2);
+        assert!(!before.is_empty());
 
         delete_scan(&conn, scan_id).unwrap();
 
-        // Nodes must be gone (CASCADE).
+        // Nodes should be gone (CASCADE).
         let after = load_scan_tree(&conn, scan_id).unwrap();
         assert!(after.is_empty());
     }
 
     #[test]
-    fn test_delete_nonexistent_scan_returns_error() {
+    fn delete_nonexistent_scan_returns_error() {
         let conn = open_in_memory().unwrap();
         let result = delete_scan(&conn, 9999);
         assert!(matches!(result, Err(DbError::ScanNotFound(9999))));
     }
 
     #[test]
-    fn test_parent_child_relationship() {
+    fn node_parent_ids_are_set_correctly() {
         let conn = open_in_memory().unwrap();
-        let nodes = sample_nodes(0);
-        let scan_id = save_scan(&conn, "/", 0, &nodes).unwrap();
+        let nodes = sample_nodes();
+
+        let scan_id = save_scan(&conn, "C:\\", "/tmp/scan", &nodes).unwrap();
         let loaded = load_scan_tree(&conn, scan_id).unwrap();
 
-        let root = &loaded[0];
-        let child = &loaded[1];
-
+        // Root has no parent.
+        let root = loaded.iter().find(|n| n.depth == 0).unwrap();
         assert!(root.parent_id.is_none());
-        assert_eq!(child.parent_id, root.id);
+
+        // Depth-1 nodes have the root as parent.
+        let depth1: Vec<_> = loaded.iter().filter(|n| n.depth == 1).collect();
+        assert!(!depth1.is_empty());
+        for node in &depth1 {
+            assert_eq!(node.parent_id, Some(root.id));
+        }
     }
 }

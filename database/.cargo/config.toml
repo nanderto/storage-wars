@@ -1,2 +1,4 @@
 [build]
-rustflags = ["-C", "target-feature=+crt-static"]
+# Emit coloured diagnostics even when stdout is not a TTY (e.g. CI).
+[term]
+color = "always"

@@ -1,26 +1,27 @@
-//! Error types for the database crate.
+//! Error types for the database component.
 
 use thiserror::Error;
 
-/// All errors that can be produced by this crate.
+/// All errors that can be produced by the database component.
 #[derive(Debug, Error)]
 pub enum DbError {
-    /// Wraps any rusqlite error.
     #[error("SQLite error: {0}")]
     Sqlite(#[from] rusqlite::Error),
 
-    /// The `APPDATA` / home directory could not be determined at runtime.
-    #[error("Could not determine application data directory")]
-    AppDataNotFound,
+    #[error("Environment variable not found: {0}")]
+    EnvVar(#[from] std::env::VarError),
 
-    /// A required scan was not found in the database.
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("Database path is invalid: {0}")]
+    InvalidPath(String),
+
     #[error("Scan not found: id={0}")]
     ScanNotFound(i64),
 
-    /// Generic I/O error (e.g. creating the database directory).
-    #[error("I/O error: {0}")]
-    Io(#[from] std::io::Error),
+    #[error("Migration failed: {0}")]
+    MigrationFailed(String),
 }
 
-/// Convenience alias used throughout the crate.
-pub type Result<T> = std::result::Result<T, DbError>;
+pub type DbResult<T> = Result<T, DbError>;
