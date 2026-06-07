@@ -1,6 +1,4 @@
 [workspace]
-members = ["crates/storage-wars"]
-resolver = "2"
-
-[workspace.dependencies]
-gpui = { git = "https://github.com/zed-industries/zed", rev = "main" }
+members = [
+    "crates/models",
+]
