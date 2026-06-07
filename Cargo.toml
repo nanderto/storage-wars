@@ -1,4 +1,6 @@
---- a/Cargo.toml
-+++ b/Cargo.toml
-@@ members = [
-+    "crates/tree_ops",
+[workspace]
+resolver = "2"
+members = [
+    "crates/models",
+    "crates/tree_ops",
+]
