@@ -9,3 +9,17 @@ members = [
     "crates/views",
 ]
 resolver = "2"
+
+[workspace.dependencies]
+gpui = { git = "https://github.com/zed-industries/zed" }
+rusqlite = { version = "0.31", features = ["bundled"] }
+sysinfo = "0.30"
+chrono = "0.4"
+
+# Inter-crate dependencies
+models = { path = "crates/models" }
+tree_ops = { path = "crates/tree_ops" }
+database = { path = "crates/database" }
+scanner = { path = "crates/scanner" }
+utils = { path = "crates/utils" }
+views = { path = "crates/views" }
