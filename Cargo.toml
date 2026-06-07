@@ -1,9 +1,10 @@
---- a/Cargo.toml
-+++ b/Cargo.toml
-@@ -2,6 +2,7 @@
- members = [
-     "crates/models",
-     "crates/tree_ops",
-+    "crates/views",
- ]
- resolver = "2"
+[workspace]
+members = [
+    "crates/models",
+    "crates/tree_ops",
+    "crates/views",
+]
+resolver = "2"
+
+[workspace.dependencies]
+gpui = { git = "https://github.com/zed-industries/zed", rev = "main" }

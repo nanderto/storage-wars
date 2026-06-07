@@ -1,2 +1,4 @@
-// ScanHistory: a 280px-wide focusable panel showing scan list with
-// Base/New selection, Compare and Delete buttons.
+// ScanHistory: A 280px-wide focusable panel displaying the list of saved scans.
+//
+// Supports Base/New scan selection, Compare button to diff two scans,
+// and Delete button to remove a scan entry.
