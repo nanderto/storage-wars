@@ -1,3 +1,3 @@
-mod main_view;
+mod main_content;
 
-pub use main_view::MainView;
+pub use main_content::MainContent;

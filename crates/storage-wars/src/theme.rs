@@ -1,91 +1,66 @@
-//! Application-wide theme tokens.
-//!
-//! Provides a [`StorageWarsTheme`] struct that holds all colour values
-//! used throughout the UI.  Currently only a dark variant is implemented.
+use gpui::{Global, Hsla, hsla};
 
-use gpui::Hsla;
-
-/// All colour tokens for the Storage Wars UI.
+/// Application-wide theme token set.
 #[derive(Debug, Clone, Copy)]
 pub struct StorageWarsTheme {
-    /// Main window / panel background.
+    // Backgrounds
     pub background: Hsla,
-    /// Slightly elevated surface (cards, sidebars).
     pub surface: Hsla,
-    /// Primary interactive accent colour.
+    pub elevated_surface: Hsla,
+    pub title_bar_background: Hsla,
+
+    // Foregrounds
+    pub foreground: Hsla,
+    pub foreground_muted: Hsla,
+    pub foreground_subtle: Hsla,
+
+    // Accents
     pub accent: Hsla,
-    /// Default body text.
-    pub text: Hsla,
-    /// Muted / secondary text.
-    pub text_muted: Hsla,
-    /// Subtle border / divider colour.
+    pub accent_hover: Hsla,
+    pub accent_active: Hsla,
+
+    // Borders
     pub border: Hsla,
-    /// Destructive action colour.
-    pub danger: Hsla,
-    /// Success / positive colour.
+    pub border_subtle: Hsla,
+
+    // Status colours
     pub success: Hsla,
+    pub warning: Hsla,
+    pub error: Hsla,
+    pub info: Hsla,
 }
 
 impl StorageWarsTheme {
-    /// Returns the canonical dark theme.
+    /// Construct the canonical dark theme for Storage Wars.
     pub fn dark() -> Self {
         Self {
-            // #0f1117 — near-black background
-            background: Hsla {
-                h: 228.0 / 360.0,
-                s: 0.14,
-                l: 0.08,
-                a: 1.0,
-            },
-            // #1a1d27 — elevated surface
-            surface: Hsla {
-                h: 228.0 / 360.0,
-                s: 0.20,
-                l: 0.13,
-                a: 1.0,
-            },
-            // #6c8ef5 — blue accent
-            accent: Hsla {
-                h: 228.0 / 360.0,
-                s: 0.85,
-                l: 0.69,
-                a: 1.0,
-            },
-            // #e2e4f0 — primary text
-            text: Hsla {
-                h: 228.0 / 360.0,
-                s: 0.30,
-                l: 0.91,
-                a: 1.0,
-            },
-            // #8b8fa8 — muted text
-            text_muted: Hsla {
-                h: 228.0 / 360.0,
-                s: 0.12,
-                l: 0.60,
-                a: 1.0,
-            },
-            // #2a2d3e — subtle border
-            border: Hsla {
-                h: 228.0 / 360.0,
-                s: 0.20,
-                l: 0.21,
-                a: 1.0,
-            },
-            // #f56c6c — danger red
-            danger: Hsla {
-                h: 0.0 / 360.0,
-                s: 0.85,
-                l: 0.69,
-                a: 1.0,
-            },
-            // #67c23a — success green
-            success: Hsla {
-                h: 100.0 / 360.0,
-                s: 0.56,
-                l: 0.49,
-                a: 1.0,
-            },
+            // Backgrounds — deep charcoal palette
+            background: hsla(220.0 / 360.0, 0.13, 0.09, 1.0),
+            surface: hsla(220.0 / 360.0, 0.12, 0.12, 1.0),
+            elevated_surface: hsla(220.0 / 360.0, 0.11, 0.16, 1.0),
+            title_bar_background: hsla(220.0 / 360.0, 0.14, 0.08, 1.0),
+
+            // Foregrounds
+            foreground: hsla(220.0 / 360.0, 0.10, 0.92, 1.0),
+            foreground_muted: hsla(220.0 / 360.0, 0.08, 0.65, 1.0),
+            foreground_subtle: hsla(220.0 / 360.0, 0.06, 0.42, 1.0),
+
+            // Accent — amber / gold to match the "storage wars" theme
+            accent: hsla(38.0 / 360.0, 0.92, 0.55, 1.0),
+            accent_hover: hsla(38.0 / 360.0, 0.92, 0.62, 1.0),
+            accent_active: hsla(38.0 / 360.0, 0.92, 0.48, 1.0),
+
+            // Borders
+            border: hsla(220.0 / 360.0, 0.10, 0.22, 1.0),
+            border_subtle: hsla(220.0 / 360.0, 0.08, 0.16, 1.0),
+
+            // Status
+            success: hsla(142.0 / 360.0, 0.69, 0.58, 1.0),
+            warning: hsla(38.0 / 360.0, 0.92, 0.55, 1.0),
+            error: hsla(0.0 / 360.0, 0.72, 0.51, 1.0),
+            info: hsla(210.0 / 360.0, 0.80, 0.60, 1.0),
         }
     }
 }
+
+impl Global for StorageWarsTheme {}

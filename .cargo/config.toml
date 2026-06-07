@@ -1,7 +1,16 @@
 [build]
-# Use the faster linker on Linux if available; harmless on macOS/Windows.
-# Uncomment and adjust for your platform as needed.
-# rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+# Faster incremental builds during development.
+incremental = true
 
-[alias]
-run-app = "run --bin storage-wars"
+[target.x86_64-unknown-linux-gnu]
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+
+[target.x86_64-pc-windows-msvc]
+rustflags = []

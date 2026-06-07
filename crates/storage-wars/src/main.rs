@@ -1,102 +1,79 @@
-//! Storage Wars — Desktop Application Entry Point
-//!
-//! Initializes the GPUI application with a 1280×800 window,
-//! dark theme, centered positioning, and a custom title bar.
-
+mod app;
 mod theme;
 mod title_bar;
 mod ui;
 
 use anyhow::Result;
-use gpui::{
-    actions, div, px, size, App, AppContext, Application, Bounds, Context, Entity, Hsla,
-    InteractiveElement, IntoElement, ParentElement, Point, Render, Styled, TitlebarOptions,
-    ViewContext, VisualContext, WindowBounds, WindowKind, WindowOptions,
-};
+use gpui::{App, AppContext, Bounds, Point, Size, WindowBounds, WindowOptions, pixels};
+use log::info;
 
+use app::StorageWarsApp;
 use theme::StorageWarsTheme;
-use title_bar::TitleBar;
 
-actions!(storage_wars, [Quit]);
-
-/// Width of the main application window in logical pixels.
-const WINDOW_WIDTH: f32 = 1280.0;
-
-/// Height of the main application window in logical pixels.
-const WINDOW_HEIGHT: f32 = 800.0;
-
-/// Root view that owns the application layout.
-struct StorageWarsApp {
-    theme: StorageWarsTheme,
-}
-
-impl StorageWarsApp {
-    fn new(_cx: &mut ViewContext<Self>) -> Self {
-        Self {
-            theme: StorageWarsTheme::dark(),
-        }
-    }
-}
-
-impl Render for StorageWarsApp {
-    fn render(&mut self, cx: &mut ViewContext<Self>) -> impl IntoElement {
-        let bg = self.theme.background;
-
-        div()
-            .flex()
-            .flex_col()
-            .size_full()
-            .bg(bg)
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .p_4()
-                    .child(ui::placeholder_content(&self.theme)),
-            )
-    }
-}
-
-fn main() {
-    // Initialise logging — respects RUST_LOG env var, defaults to info.
+fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    log::info!("Starting Storage Wars v{}", env!("CARGO_PKG_VERSION"));
+    info!("Starting Storage Wars desktop application");
 
-    Application::new().run(|cx: &mut AppContext| {
-        // Register global quit action.
-        cx.on_action(|_: &Quit, cx| cx.quit());
+    App::new().run(|cx: &mut AppContext| {
+        let theme = StorageWarsTheme::dark();
+        cx.set_global(theme);
 
         let window_options = build_window_options(cx);
 
         cx.open_window(window_options, |cx| {
-            cx.new_view(StorageWarsApp::new)
+            cx.new_view(|cx| StorageWarsApp::new(cx))
         })
-        .expect("failed to open main window");
-
-        cx.activate(true);
+        .expect("Failed to open Storage Wars window");
     });
+
+    Ok(())
 }
 
-/// Constructs [`WindowOptions`] for the main 1280×800 centered window.
-fn build_window_options(_cx: &mut AppContext) -> WindowOptions {
+fn build_window_options(cx: &AppContext) -> WindowOptions {
+    const WINDOW_WIDTH: f32 = 1280.0;
+    const WINDOW_HEIGHT: f32 = 800.0;
+
+    let window_size = Size {
+        width: pixels(WINDOW_WIDTH),
+        height: pixels(WINDOW_HEIGHT),
+    };
+
+    // Attempt to center the window on the primary display.
+    let center_position = cx
+        .primary_display()
+        .and_then(|display| {
+            let display_bounds = display.bounds();
+            let x = display_bounds.origin.x
+                + (display_bounds.size.width - pixels(WINDOW_WIDTH)) / 2.0;
+            let y = display_bounds.origin.y
+                + (display_bounds.size.height - pixels(WINDOW_HEIGHT)) / 2.0;
+            Some(Point { x, y })
+        })
+        .unwrap_or(Point {
+            x: pixels(0.0),
+            y: pixels(0.0),
+        });
+
     WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds {
-            origin: Point::default(), // GPUI will center when origin is zero
-            size: size(px(WINDOW_WIDTH), px(WINDOW_HEIGHT)),
+            origin: center_position,
+            size: window_size,
         })),
-        titlebar: Some(TitlebarOptions {
+        titlebar: Some(gpui::TitlebarOptions {
             title: Some("Storage Wars".into()),
             appears_transparent: true,
-            traffic_light_position: None,
+            traffic_light_position: Some(Point {
+                x: pixels(12.0),
+                y: pixels(12.0),
+            }),
         }),
         focus: true,
         show: true,
-        kind: WindowKind::Normal,
+        kind: gpui::WindowKind::Normal,
         is_movable: true,
         display_id: None,
-        window_background: gpui::WindowBackgroundAppearance::Blurred,
-        app_id: Some("storage-wars".into()),
+        window_background: gpui::WindowBackgroundAppearance::Opaque,
+        app_id: Some("storage-wars".to_string()),
     }
 }
