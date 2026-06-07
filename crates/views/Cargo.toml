@@ -9,4 +9,4 @@ tree_ops = { path = "../tree_ops" }
 database = { path = "../database" }
 scanner = { path = "../scanner" }
 utils = { path = "../utils" }
-gpui = "0.1"
+gpui = "0.1.0"

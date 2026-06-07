@@ -1,1 +1,0 @@
-// Models crate — shared data types for Storage Wars.
