@@ -1,4 +1,4 @@
-/// Represents a node in the filesystem tree (recursive).
+/// Represents a node in the filesystem tree (recursive via `children`).
 #[derive(Debug, Clone)]
 pub struct FsNode {
     pub name: String,
@@ -11,7 +11,7 @@ pub struct FsNode {
     pub children: Vec<FsNode>,
 }
 
-/// Flat database representation of a filesystem node, suitable for SQL storage.
+/// Flat database representation of a filesystem node, linked by `parent_id`.
 #[derive(Debug, Clone)]
 pub struct DbNode {
     pub id: Option<i64>,
@@ -26,7 +26,7 @@ pub struct DbNode {
     pub modified: Option<String>,
 }
 
-/// Metadata about a scan session.
+/// Metadata for a single scan session.
 #[derive(Debug, Clone)]
 pub struct ScanMeta {
     pub scan_id: i64,
