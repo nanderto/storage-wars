@@ -1,0 +1,3 @@
+[build]
+# Ensure deterministic builds across platforms.
+rustflags = ["-C", "target-cpu=native"]

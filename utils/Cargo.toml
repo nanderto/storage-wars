@@ -1,0 +1,15 @@
+[package]
+name = "utils"
+version = "0.1.0"
+edition = "2021"
+description = "Utility functions for Desktop component: size formatting, number formatting, timestamp generation, and drive enumeration"
+authors = []
+
+[dependencies]
+sysinfo = "0.30"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
