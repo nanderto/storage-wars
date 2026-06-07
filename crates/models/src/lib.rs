@@ -1,4 +1,4 @@
-/// Represents a node in the filesystem tree (recursive).
+/// Represents a node in the filesystem tree.
 #[derive(Debug, Clone)]
 pub struct FsNode {
     pub name: String,
@@ -26,7 +26,7 @@ pub struct DbNode {
     pub modified: Option<String>,
 }
 
-/// Metadata for a scan session.
+/// Metadata about a scan session.
 #[derive(Debug, Clone)]
 pub struct ScanMeta {
     pub scan_id: i64,
