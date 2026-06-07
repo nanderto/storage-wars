@@ -1,76 +1,79 @@
-//! Custom title bar component rendered at the top of the main window.
-//!
-//! On macOS the native traffic-light buttons are positioned by GPUI; this
-//! component fills the remaining space with the application name and any
-//! future toolbar actions.
-
 use gpui::{
-    div, px, AnyElement, Element, IntoElement, ParentElement, RenderOnce, Styled,
+    div, px, App, Context, Entity, IntoElement, ParentElement, Render, Styled, Window,
 };
 
-use crate::theme::StorageWarsTheme;
-
-/// Height of the title bar in logical pixels.
-pub const TITLE_BAR_HEIGHT: f32 = 36.0;
-
-/// Left padding that clears the macOS traffic-light buttons.
-const TRAFFIC_LIGHT_CLEARANCE: f32 = 72.0;
-
-/// The custom title bar element.
-#[derive(IntoElement)]
+/// Custom title bar rendered inside the GPUI window.
+///
+/// Replaces the OS-native chrome so we can apply the dark theme consistently
+/// across all platforms.
 pub struct TitleBar {
-    theme: StorageWarsTheme,
+    title: String,
 }
 
 impl TitleBar {
-    /// Creates a new [`TitleBar`] with the given theme.
-    pub fn new(theme: StorageWarsTheme) -> Self {
-        Self { theme }
+    pub fn new(_cx: &mut Context<Self>) -> Self {
+        Self {
+            title: "Storage Wars".to_string(),
+        }
     }
 }
 
-impl RenderOnce for TitleBar {
-    fn render(self, _window: &mut gpui::Window, _cx: &mut gpui::App) -> impl IntoElement {
+impl Render for TitleBar {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         div()
-            // Allow the OS / GPUI to use this region for window dragging.
-            .id("title-bar")
             .flex()
             .flex_row()
             .items_center()
+            .justify_between()
             .w_full()
-            .h(px(TITLE_BAR_HEIGHT))
-            .bg(self.theme.title_bar_background)
+            .h(px(40.0))
+            .px(px(16.0))
+            .bg(gpui::rgb(0x16213e))
             .border_b_1()
-            .border_color(self.theme.border)
-            // Pad left to avoid overlapping the macOS traffic-light buttons.
-            .pl(px(TRAFFIC_LIGHT_CLEARANCE))
-            .pr(px(16.0))
+            .border_color(gpui::rgb(0x2a2a4a))
+            // Window drag region — the entire title bar can be used to move the window.
             .child(
                 div()
                     .flex()
                     .flex_row()
                     .items_center()
                     .gap(px(8.0))
-                    .child(app_icon())
-                    .child(app_title(&self.theme)),
+                    .child(
+                        // Application icon placeholder
+                        div()
+                            .w(px(20.0))
+                            .h(px(20.0))
+                            .rounded(px(4.0))
+                            .bg(gpui::rgb(0xe94560)),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(gpui::rgb(0xe0e0e0))
+                            .child(self.title.clone()),
+                    ),
+            )
+            .child(
+                // Window controls placeholder (close / minimise / maximise)
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(window_control_button(gpui::rgb(0xff5f57)))
+                    .child(window_control_button(gpui::rgb(0xffbd2e)))
+                    .child(window_control_button(gpui::rgb(0x28c840))),
             )
     }
 }
 
-/// Renders a simple coloured square as a placeholder application icon.
-fn app_icon() -> impl IntoElement {
+/// Render a single circular window-control button.
+fn window_control_button(color: gpui::Rgba) -> impl IntoElement {
     div()
-        .w(px(16.0))
-        .h(px(16.0))
-        .rounded(px(3.0))
-        .bg(gpui::hsla(217.0 / 360.0, 0.91, 0.60, 1.0))
-}
-
-/// Renders the application name label.
-fn app_title(theme: &StorageWarsTheme) -> impl IntoElement {
-    div()
-        .text_sm()
-        .font_weight(gpui::FontWeight::SEMIBOLD)
-        .text_color(theme.title_bar_foreground)
-        .child("Storage Wars")
+        .w(px(12.0))
+        .h(px(12.0))
+        .rounded_full()
+        .bg(color)
+        .cursor_pointer()
 }

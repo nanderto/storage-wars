@@ -1,3 +1,3 @@
-//! UI sub-modules for the Storage Wars application.
+mod main_view;
 
-pub mod content;
+pub use main_view::MainView;

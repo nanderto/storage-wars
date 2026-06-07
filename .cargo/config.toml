@@ -1,5 +1,6 @@
 [build]
-# Use the faster linker on supported platforms.
+# Use the faster linker on Linux if available.
+# On macOS the default `ld` is already fast enough.
 
 [target.x86_64-unknown-linux-gnu]
 linker = "clang"
@@ -10,10 +11,10 @@ linker = "clang"
 rustflags = ["-C", "link-arg=-fuse-ld=lld"]
 
 [target.x86_64-apple-darwin]
-rustflags = ["-C", "link-arg=-fuse-ld=/usr/local/bin/zld"]
+rustflags = []
 
 [target.aarch64-apple-darwin]
-# Apple Silicon — use the default Apple linker (fastest on arm64 macOS).
+rustflags = []
 
 [target.x86_64-pc-windows-msvc]
-rustflags = ["-C", "target-feature=+crt-static"]
+rustflags = []
