@@ -31,6 +31,7 @@ pub struct DbNode {
     pub path: String,
     pub size: u64,
     pub is_dir: bool,
+    pub modified: String,
 }
 
 /// Information about a drive/volume.
@@ -42,16 +43,16 @@ pub struct DriveInfo {
     pub available_space: u64,
 }
 
-/// FsNode wrapper carrying UI-specific state.
+/// FsNode wrapper for UI rendering with display state.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiNode {
     pub node: FsNode,
     pub depth: u32,
     pub expanded: bool,
-    pub scan_progress: f64,
+    pub scan_progress: f32,
 }
 
-/// Represents a size delta with a display color.
+/// Represents a size delta with classification and display color.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SizeChange {
     pub delta: i64,
@@ -59,10 +60,10 @@ pub struct SizeChange {
     pub hex_color: String,
 }
 
-/// Messages emitted during a scan.
+/// Messages emitted during a scan operation.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ScanMessage {
     DirScanned { path: String, size: u64 },
     ScanError { path: String, error: String },
-    Complete { scan_id: i64 },
+    Complete { total_size: u64 },
 }
