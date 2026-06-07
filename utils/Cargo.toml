@@ -2,7 +2,7 @@
 name = "utils"
 version = "0.1.0"
 edition = "2021"
-description = "Utility functions for Desktop component: size formatting, number formatting, ISO 8601 timestamps, and drive enumeration"
+description = "Utility functions for Desktop component: size formatting, number formatting, timestamp generation, and drive enumeration"
 authors = []
 
 [dependencies]

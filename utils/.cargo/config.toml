@@ -1,14 +1,14 @@
+# Build configuration for the utils component.
+
 [build]
-# Ensure deterministic builds across platforms.
-# Uncomment the target line if cross-compiling is needed.
-# target = "x86_64-pc-windows-msvc"
+# Use all available logical CPUs for parallel compilation.
+jobs = 0
 
 [profile.dev]
 # Faster incremental builds during development.
 opt-level = 0
 debug = true
 
-[profile.test]
-# Keep debug info for better test diagnostics.
-opt-level = 0
-debug = true
+[profile.release]
+opt-level = 3
+lto = "thin"
