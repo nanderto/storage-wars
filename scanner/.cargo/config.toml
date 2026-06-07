@@ -1,0 +1,3 @@
+[build]
+# Emit coloured diagnostics even when stdout is redirected.
+rustflags = ["-C", "target-cpu=native"]
