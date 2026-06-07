@@ -1,14 +1,12 @@
 [package]
-name = "storage-wars"
+name = "views"
 version = "0.1.0"
 edition = "2021"
 
-[[bin]]
-name = "storage-wars"
-path = "src/main.rs"
-
 [dependencies]
-views = { path = "../views" }
 models = { path = "../models" }
+tree_ops = { path = "../tree_ops" }
 database = { path = "../database" }
+scanner = { path = "../scanner" }
+utils = { path = "../utils" }
 gpui = { git = "https://github.com/zed-industries/zed", rev = "v0.167.2" }
