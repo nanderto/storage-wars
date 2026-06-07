@@ -5,15 +5,17 @@ edition = "2021"
 description = "Tree manipulation utilities for filesystem node hierarchies"
 authors = []
 
+[[bin]]
+name = "tree_ops"
+path = "src/main.rs"
+
 [lib]
 name = "tree_ops"
 path = "src/lib.rs"
 
 [dependencies]
-# No external dependencies required for core tree operations
 
 [dev-dependencies]
-# For testing
 
 [profile.release]
 opt-level = 3
