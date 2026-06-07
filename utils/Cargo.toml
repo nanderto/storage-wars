@@ -2,15 +2,22 @@
 name = "utils"
 version = "0.1.0"
 edition = "2021"
-description = "Utility functions for the Desktop component"
+description = "Utility functions for Desktop component: size formatting, number formatting, timestamp generation, and drive enumeration"
+authors = []
 
 [dependencies]
 sysinfo = "0.30"
+
+[[bin]]
+name = "utils"
+path = "src/main.rs"
 
 [lib]
 name = "utils"
 path = "src/lib.rs"
 
-[[bin]]
-name = "utils"
-path = "src/main.rs"
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
