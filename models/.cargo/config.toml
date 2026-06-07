@@ -1,4 +1,3 @@
 [build]
-# Emit all compiler warnings as errors in CI-like environments.
-# Remove or adjust this flag for local development if desired.
+# Emit warnings as errors in CI; remove this line for local development
 # rustflags = ["-D", "warnings"]

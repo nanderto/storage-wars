@@ -1,15 +1,18 @@
-//! Drive and volume information.
+//! Drive / volume information.
 
 use serde::{Deserialize, Serialize};
 
-/// Information about a storage drive or volume.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Describes a storage drive or volume available on the system.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DriveInfo {
-    /// The drive name or mount point (e.g. `"C:\\"` on Windows, `"/"` on Unix).
+    /// Human-readable name of the drive (e.g. `"Local Disk"`, `"USB Drive"`).
     pub name: String,
 
-    /// The volume label assigned to the drive, if any.
+    /// Volume label assigned to the drive, if any.
     pub volume_label: Option<String>,
+
+    /// Mount point or drive letter (e.g. `"C:\\"` on Windows, `"/"` on Unix).
+    pub mount_point: String,
 
     /// Total capacity of the drive in bytes.
     pub total_space: u64,
@@ -19,38 +22,39 @@ pub struct DriveInfo {
 }
 
 impl DriveInfo {
-    /// Creates a new `DriveInfo` with the given drive details.
+    /// Creates a new [`DriveInfo`] with the given name, mount point, and
+    /// space values.
     pub fn new(
         name: impl Into<String>,
-        volume_label: Option<String>,
+        mount_point: impl Into<String>,
         total_space: u64,
         available_space: u64,
     ) -> Self {
         Self {
             name: name.into(),
-            volume_label,
+            volume_label: None,
+            mount_point: mount_point.into(),
             total_space,
             available_space,
         }
     }
 
-    /// Returns the used space in bytes.
+    /// Returns the used space in bytes (`total_space - available_space`).
+    ///
+    /// Returns `0` if `available_space` exceeds `total_space` to avoid
+    /// underflow on unexpected data.
     pub fn used_space(&self) -> u64 {
         self.total_space.saturating_sub(self.available_space)
     }
 
-    /// Returns the percentage of space used as a value between 0.0 and 100.0.
+    /// Returns the percentage of space used as a value in `[0.0, 100.0]`.
+    ///
     /// Returns `0.0` if `total_space` is zero.
     pub fn used_percent(&self) -> f64 {
         if self.total_space == 0 {
             return 0.0;
         }
         (self.used_space() as f64 / self.total_space as f64) * 100.0
-    }
-
-    /// Returns `true` if the drive has a volume label.
-    pub fn has_label(&self) -> bool {
-        self.volume_label.is_some()
     }
 }
 
@@ -60,44 +64,45 @@ mod tests {
 
     #[test]
     fn test_new_drive_info() {
-        let info = DriveInfo::new("C:\\", Some("System".to_string()), 500_000_000_000, 200_000_000_000);
-        assert_eq!(info.name, "C:\\");
-        assert_eq!(info.volume_label, Some("System".to_string()));
-        assert_eq!(info.total_space, 500_000_000_000);
-        assert_eq!(info.available_space, 200_000_000_000);
+        let drive = DriveInfo::new("Local Disk", "C:\\", 500_000_000_000, 200_000_000_000);
+        assert_eq!(drive.name, "Local Disk");
+        assert_eq!(drive.mount_point, "C:\\");
+        assert_eq!(drive.total_space, 500_000_000_000);
+        assert_eq!(drive.available_space, 200_000_000_000);
+        assert!(drive.volume_label.is_none());
     }
 
     #[test]
     fn test_used_space() {
-        let info = DriveInfo::new("/", None, 1000, 400);
-        assert_eq!(info.used_space(), 600);
+        let drive = DriveInfo::new("Disk", "/", 1000, 400);
+        assert_eq!(drive.used_space(), 600);
+    }
+
+    #[test]
+    fn test_used_space_no_underflow() {
+        let drive = DriveInfo::new("Disk", "/", 100, 200);
+        assert_eq!(drive.used_space(), 0);
     }
 
     #[test]
     fn test_used_percent() {
-        let info = DriveInfo::new("/", None, 1000, 250);
-        assert!((info.used_percent() - 75.0).abs() < f64::EPSILON);
+        let drive = DriveInfo::new("Disk", "/", 1000, 250);
+        assert!((drive.used_percent() - 75.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn test_used_percent_zero_total() {
-        let info = DriveInfo::new("/", None, 0, 0);
-        assert_eq!(info.used_percent(), 0.0);
-    }
-
-    #[test]
-    fn test_has_label() {
-        let with_label = DriveInfo::new("/", Some("Data".to_string()), 1000, 500);
-        let without_label = DriveInfo::new("/", None, 1000, 500);
-        assert!(with_label.has_label());
-        assert!(!without_label.has_label());
+        let drive = DriveInfo::new("Empty", "/mnt/empty", 0, 0);
+        assert_eq!(drive.used_percent(), 0.0);
     }
 
     #[test]
     fn test_serialization_roundtrip() {
-        let info = DriveInfo::new("D:\\", Some("Backup".to_string()), 2_000_000_000_000, 1_500_000_000_000);
-        let json = serde_json::to_string(&info).expect("serialization failed");
+        let mut drive = DriveInfo::new("Data", "/data", 2_000_000_000, 500_000_000);
+        drive.volume_label = Some("DATA_VOL".to_string());
+
+        let json = serde_json::to_string(&drive).expect("serialization failed");
         let restored: DriveInfo = serde_json::from_str(&json).expect("deserialization failed");
-        assert_eq!(info, restored);
+        assert_eq!(drive, restored);
     }
 }

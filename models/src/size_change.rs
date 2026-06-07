@@ -2,101 +2,93 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Classifies the direction and magnitude of a size change between scans.
+/// Classifies the direction and magnitude of a size change between two scans.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SizeChangeTrend {
-    /// The item is new (no previous scan data).
+    /// The item is new (no previous size recorded).
     New,
-    /// The item has grown significantly.
-    LargeIncrease,
-    /// The item has grown slightly.
-    SmallIncrease,
-    /// The item size is unchanged.
-    Unchanged,
-    /// The item has shrunk slightly.
-    SmallDecrease,
-    /// The item has shrunk significantly.
-    LargeDecrease,
-    /// The item no longer exists (deleted).
+    /// The item was deleted (no current size, only previous).
     Deleted,
+    /// The item grew significantly (above a configured threshold).
+    IncreasedLarge,
+    /// The item grew slightly.
+    IncreasedSmall,
+    /// The item shrank slightly.
+    DecreasedSmall,
+    /// The item shrank significantly.
+    DecreasedLarge,
+    /// No meaningful change in size.
+    Unchanged,
 }
 
-/// Represents the size change of a filesystem node between two scans,
-/// including a trend classification and a hex color for UI display.
+/// Represents a classified size change between two scan sessions, including
+/// the raw delta and a hex color string for UI rendering.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SizeChange {
-    /// The absolute size delta in bytes (positive = grew, negative = shrank).
-    pub delta_bytes: i64,
-
-    /// The relative change as a percentage. `None` if there is no previous size.
-    pub delta_percent: Option<f64>,
-
-    /// The classified trend of the size change.
+    /// The trend / classification of the size change.
     pub trend: SizeChangeTrend,
 
-    /// A hex color string (e.g. `"#FF5733"`) for rendering this change in the UI.
+    /// The raw size delta in bytes (positive = grew, negative = shrank).
+    pub delta_bytes: i64,
+
+    /// A CSS-style hex color string (e.g. `"#FF4444"`) for UI rendering.
     pub hex_color: String,
 }
 
+impl SizeChangeTrend {
+    /// Returns the canonical hex color associated with this trend.
+    pub fn hex_color(self) -> &'static str {
+        match self {
+            SizeChangeTrend::New => "#4CAF50",
+            SizeChangeTrend::Deleted => "#9E9E9E",
+            SizeChangeTrend::IncreasedLarge => "#F44336",
+            SizeChangeTrend::IncreasedSmall => "#FF9800",
+            SizeChangeTrend::DecreasedSmall => "#8BC34A",
+            SizeChangeTrend::DecreasedLarge => "#2196F3",
+            SizeChangeTrend::Unchanged => "#BDBDBD",
+        }
+    }
+}
+
 impl SizeChange {
-    /// Threshold in percent above which a change is considered "large".
-    const LARGE_THRESHOLD_PERCENT: f64 = 20.0;
-
-    /// Computes a `SizeChange` from a current size and an optional previous size.
-    pub fn compute(current: u64, previous: Option<u64>) -> Self {
-        match previous {
-            None => Self {
-                delta_bytes: current as i64,
-                delta_percent: None,
-                trend: SizeChangeTrend::New,
-                hex_color: Self::color_for(SizeChangeTrend::New).to_string(),
-            },
-            Some(prev) => {
-                let delta = current as i64 - prev as i64;
-                let percent = if prev == 0 {
-                    None
+    /// Classifies a size change given the `current` and optional `previous`
+    /// size in bytes, using the provided `large_threshold` (in bytes) to
+    /// distinguish large from small changes.
+    pub fn classify(current: Option<u64>, previous: Option<u64>, large_threshold: u64) -> Self {
+        let trend = match (current, previous) {
+            (Some(_), None) => SizeChangeTrend::New,
+            (None, Some(_)) => SizeChangeTrend::Deleted,
+            (None, None) => SizeChangeTrend::Unchanged,
+            (Some(cur), Some(prev)) => {
+                let delta = cur as i64 - prev as i64;
+                let abs_delta = delta.unsigned_abs();
+                if abs_delta == 0 {
+                    SizeChangeTrend::Unchanged
+                } else if delta > 0 {
+                    if abs_delta >= large_threshold {
+                        SizeChangeTrend::IncreasedLarge
+                    } else {
+                        SizeChangeTrend::IncreasedSmall
+                    }
+                } else if abs_delta >= large_threshold {
+                    SizeChangeTrend::DecreasedLarge
                 } else {
-                    Some((delta as f64 / prev as f64) * 100.0)
-                };
-
-                let trend = Self::classify(delta, percent);
-                Self {
-                    delta_bytes: delta,
-                    delta_percent: percent,
-                    trend,
-                    hex_color: Self::color_for(trend).to_string(),
+                    SizeChangeTrend::DecreasedSmall
                 }
             }
-        }
-    }
+        };
 
-    /// Classifies the trend based on the delta and optional percentage.
-    fn classify(delta: i64, percent: Option<f64>) -> SizeChangeTrend {
-        if delta == 0 {
-            return SizeChangeTrend::Unchanged;
-        }
+        let delta_bytes = match (current, previous) {
+            (Some(cur), Some(prev)) => cur as i64 - prev as i64,
+            (Some(cur), None) => cur as i64,
+            (None, Some(prev)) => -(prev as i64),
+            (None, None) => 0,
+        };
 
-        match percent {
-            Some(p) if p > Self::LARGE_THRESHOLD_PERCENT => SizeChangeTrend::LargeIncrease,
-            Some(p) if p > 0.0 => SizeChangeTrend::SmallIncrease,
-            Some(p) if p < -Self::LARGE_THRESHOLD_PERCENT => SizeChangeTrend::LargeDecrease,
-            Some(p) if p < 0.0 => SizeChangeTrend::SmallDecrease,
-            None if delta > 0 => SizeChangeTrend::LargeIncrease,
-            None if delta < 0 => SizeChangeTrend::LargeDecrease,
-            _ => SizeChangeTrend::Unchanged,
-        }
-    }
-
-    /// Returns the canonical hex color for a given trend.
-    pub fn color_for(trend: SizeChangeTrend) -> &'static str {
-        match trend {
-            SizeChangeTrend::New => "#3498DB",          // Blue
-            SizeChangeTrend::LargeIncrease => "#E74C3C", // Red
-            SizeChangeTrend::SmallIncrease => "#E67E22", // Orange
-            SizeChangeTrend::Unchanged => "#95A5A6",     // Gray
-            SizeChangeTrend::SmallDecrease => "#2ECC71", // Light green
-            SizeChangeTrend::LargeDecrease => "#27AE60", // Dark green
-            SizeChangeTrend::Deleted => "#8E44AD",       // Purple
+        Self {
+            hex_color: trend.hex_color().to_string(),
+            trend,
+            delta_bytes,
         }
     }
 }
@@ -105,71 +97,63 @@ impl SizeChange {
 mod tests {
     use super::*;
 
+    const THRESHOLD: u64 = 1_048_576; // 1 MiB
+
     #[test]
     fn test_new_item() {
-        let change = SizeChange::compute(1024, None);
-        assert_eq!(change.trend, SizeChangeTrend::New);
-        assert_eq!(change.delta_bytes, 1024);
-        assert!(change.delta_percent.is_none());
-        assert_eq!(change.hex_color, "#3498DB");
+        let sc = SizeChange::classify(Some(500), None, THRESHOLD);
+        assert_eq!(sc.trend, SizeChangeTrend::New);
+        assert_eq!(sc.delta_bytes, 500);
+        assert_eq!(sc.hex_color, "#4CAF50");
+    }
+
+    #[test]
+    fn test_deleted_item() {
+        let sc = SizeChange::classify(None, Some(1000), THRESHOLD);
+        assert_eq!(sc.trend, SizeChangeTrend::Deleted);
+        assert_eq!(sc.delta_bytes, -1000);
     }
 
     #[test]
     fn test_unchanged() {
-        let change = SizeChange::compute(1024, Some(1024));
-        assert_eq!(change.trend, SizeChangeTrend::Unchanged);
-        assert_eq!(change.delta_bytes, 0);
+        let sc = SizeChange::classify(Some(1000), Some(1000), THRESHOLD);
+        assert_eq!(sc.trend, SizeChangeTrend::Unchanged);
+        assert_eq!(sc.delta_bytes, 0);
     }
 
     #[test]
-    fn test_large_increase() {
-        let change = SizeChange::compute(2000, Some(1000));
-        assert_eq!(change.trend, SizeChangeTrend::LargeIncrease);
-        assert!(change.delta_bytes > 0);
+    fn test_increased_small() {
+        let sc = SizeChange::classify(Some(1000 + 100), Some(1000), THRESHOLD);
+        assert_eq!(sc.trend, SizeChangeTrend::IncreasedSmall);
+        assert_eq!(sc.delta_bytes, 100);
     }
 
     #[test]
-    fn test_small_increase() {
-        let change = SizeChange::compute(1050, Some(1000));
-        assert_eq!(change.trend, SizeChangeTrend::SmallIncrease);
+    fn test_increased_large() {
+        let sc = SizeChange::classify(Some(1000 + THRESHOLD), Some(1000), THRESHOLD);
+        assert_eq!(sc.trend, SizeChangeTrend::IncreasedLarge);
+        assert_eq!(sc.delta_bytes, THRESHOLD as i64);
     }
 
     #[test]
-    fn test_large_decrease() {
-        let change = SizeChange::compute(500, Some(1000));
-        assert_eq!(change.trend, SizeChangeTrend::LargeDecrease);
-        assert!(change.delta_bytes < 0);
+    fn test_decreased_small() {
+        let sc = SizeChange::classify(Some(1000), Some(1000 + 100), THRESHOLD);
+        assert_eq!(sc.trend, SizeChangeTrend::DecreasedSmall);
+        assert_eq!(sc.delta_bytes, -100);
     }
 
     #[test]
-    fn test_small_decrease() {
-        let change = SizeChange::compute(950, Some(1000));
-        assert_eq!(change.trend, SizeChangeTrend::SmallDecrease);
-    }
-
-    #[test]
-    fn test_color_for_all_trends() {
-        let trends = [
-            SizeChangeTrend::New,
-            SizeChangeTrend::LargeIncrease,
-            SizeChangeTrend::SmallIncrease,
-            SizeChangeTrend::Unchanged,
-            SizeChangeTrend::SmallDecrease,
-            SizeChangeTrend::LargeDecrease,
-            SizeChangeTrend::Deleted,
-        ];
-        for trend in trends {
-            let color = SizeChange::color_for(trend);
-            assert!(color.starts_with('#'), "color for {trend:?} must start with '#'");
-            assert_eq!(color.len(), 7, "color for {trend:?} must be 7 chars");
-        }
+    fn test_decreased_large() {
+        let sc = SizeChange::classify(Some(1000), Some(1000 + THRESHOLD), THRESHOLD);
+        assert_eq!(sc.trend, SizeChangeTrend::DecreasedLarge);
+        assert_eq!(sc.delta_bytes, -(THRESHOLD as i64));
     }
 
     #[test]
     fn test_serialization_roundtrip() {
-        let change = SizeChange::compute(2048, Some(1024));
-        let json = serde_json::to_string(&change).expect("serialization failed");
+        let sc = SizeChange::classify(Some(2_000_000), Some(500_000), THRESHOLD);
+        let json = serde_json::to_string(&sc).expect("serialization failed");
         let restored: SizeChange = serde_json::from_str(&json).expect("deserialization failed");
-        assert_eq!(change, restored);
+        assert_eq!(sc, restored);
     }
 }

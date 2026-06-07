@@ -4,23 +4,21 @@ use serde::{Deserialize, Serialize};
 
 use crate::FsNode;
 
-/// Messages produced by the scanner and consumed by the UI or storage layer.
-///
-/// These messages form the communication protocol between the background
-/// scanning thread and the rest of the application.
+/// Messages produced by the scanner and consumed by the UI or persistence
+/// layer during an active scan session.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ScanMessage {
     /// Emitted each time a directory has been fully scanned.
     DirScanned {
-        /// The scanned directory node, including its immediate children.
+        /// The node representing the scanned directory.
         node: FsNode,
-        /// The total number of items scanned so far in this session.
-        items_scanned: u64,
+        /// Number of directories scanned so far in this session.
+        dirs_scanned: u64,
     },
 
-    /// Emitted when a non-fatal error occurs while scanning a path.
+    /// Emitted when a non-fatal error is encountered while scanning a path.
     ScanError {
-        /// The path that caused the error.
+        /// The path that could not be accessed or processed.
         path: String,
         /// A human-readable description of the error.
         message: String,
@@ -28,15 +26,13 @@ pub enum ScanMessage {
 
     /// Emitted once when the entire scan has finished.
     Complete {
-        /// The root node of the fully scanned tree.
-        root: FsNode,
-        /// Total number of files found.
+        /// Total number of files discovered.
         total_files: u64,
-        /// Total number of folders found.
-        total_folders: u64,
-        /// Total size in bytes of all scanned items.
+        /// Total number of directories discovered.
+        total_dirs: u64,
+        /// Aggregate size in bytes of all discovered items.
         total_size: u64,
-        /// Number of errors encountered during the scan.
+        /// Number of non-fatal errors encountered during the scan.
         error_count: u64,
     },
 }
@@ -52,12 +48,12 @@ impl ScanMessage {
         matches!(self, ScanMessage::ScanError { .. })
     }
 
-    /// Returns the path associated with this message, if any.
-    pub fn path(&self) -> Option<&str> {
+    /// Returns the path associated with a [`ScanMessage::ScanError`], or
+    /// `None` for other variants.
+    pub fn error_path(&self) -> Option<&str> {
         match self {
-            ScanMessage::DirScanned { node, .. } => Some(&node.path),
-            ScanMessage::ScanError { path, .. } => Some(path),
-            ScanMessage::Complete { root, .. } => Some(&root.path),
+            ScanMessage::ScanError { path, .. } => Some(path.as_str()),
+            _ => None,
         }
     }
 }
@@ -66,19 +62,16 @@ impl ScanMessage {
 mod tests {
     use super::*;
 
-    fn sample_node() -> FsNode {
-        FsNode::new_dir("root", "/")
-    }
-
     #[test]
     fn test_dir_scanned_message() {
+        let node = FsNode::new("src", "/project/src");
         let msg = ScanMessage::DirScanned {
-            node: sample_node(),
-            items_scanned: 42,
+            node: node.clone(),
+            dirs_scanned: 5,
         };
         assert!(!msg.is_complete());
         assert!(!msg.is_error());
-        assert_eq!(msg.path(), Some("/"));
+        assert!(msg.error_path().is_none());
     }
 
     #[test]
@@ -87,30 +80,30 @@ mod tests {
             path: "/restricted".to_string(),
             message: "Permission denied".to_string(),
         };
-        assert!(msg.is_error());
         assert!(!msg.is_complete());
-        assert_eq!(msg.path(), Some("/restricted"));
+        assert!(msg.is_error());
+        assert_eq!(msg.error_path(), Some("/restricted"));
     }
 
     #[test]
     fn test_complete_message() {
         let msg = ScanMessage::Complete {
-            root: sample_node(),
             total_files: 1000,
-            total_folders: 50,
-            total_size: 5_000_000,
+            total_dirs: 50,
+            total_size: 1_073_741_824,
             error_count: 2,
         };
         assert!(msg.is_complete());
         assert!(!msg.is_error());
-        assert_eq!(msg.path(), Some("/"));
+        assert!(msg.error_path().is_none());
     }
 
     #[test]
-    fn test_serialization_roundtrip() {
+    fn test_serialization_roundtrip_dir_scanned() {
+        let node = FsNode::new("bin", "/usr/bin");
         let msg = ScanMessage::DirScanned {
-            node: sample_node(),
-            items_scanned: 10,
+            node,
+            dirs_scanned: 12,
         };
         let json = serde_json::to_string(&msg).expect("serialization failed");
         let restored: ScanMessage = serde_json::from_str(&json).expect("deserialization failed");
@@ -118,10 +111,12 @@ mod tests {
     }
 
     #[test]
-    fn test_error_serialization_roundtrip() {
-        let msg = ScanMessage::ScanError {
-            path: "/foo/bar".to_string(),
-            message: "IO error".to_string(),
+    fn test_serialization_roundtrip_complete() {
+        let msg = ScanMessage::Complete {
+            total_files: 500,
+            total_dirs: 20,
+            total_size: 524_288_000,
+            error_count: 0,
         };
         let json = serde_json::to_string(&msg).expect("serialization failed");
         let restored: ScanMessage = serde_json::from_str(&json).expect("deserialization failed");

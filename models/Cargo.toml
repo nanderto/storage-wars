@@ -5,9 +5,12 @@ edition = "2021"
 description = "Core data model types for the disk analyzer desktop application"
 authors = []
 
+[lib]
+name = "models"
+path = "src/lib.rs"
+
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
 
 [dev-dependencies]

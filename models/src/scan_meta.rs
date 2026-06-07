@@ -15,14 +15,14 @@ pub struct ScanMeta {
     /// Timestamp when the scan was started.
     pub started_at: DateTime<Utc>,
 
-    /// Timestamp when the scan completed. `None` if still in progress.
+    /// Timestamp when the scan completed, or `None` if still in progress.
     pub completed_at: Option<DateTime<Utc>>,
 
     /// Total number of files discovered during the scan.
     pub total_files: u64,
 
-    /// Total number of folders discovered during the scan.
-    pub total_folders: u64,
+    /// Total number of directories discovered during the scan.
+    pub total_dirs: u64,
 
     /// Total size in bytes of all scanned items.
     pub total_size: u64,
@@ -30,12 +30,13 @@ pub struct ScanMeta {
     /// Whether the scan completed successfully.
     pub is_complete: bool,
 
-    /// Optional error message if the scan encountered a fatal error.
-    pub error: Option<String>,
+    /// Optional label or description for this scan session.
+    pub label: Option<String>,
 }
 
 impl ScanMeta {
-    /// Creates a new `ScanMeta` for a scan that is starting now.
+    /// Creates a new [`ScanMeta`] for the given scan `id` and `root_path`,
+    /// recording the current UTC time as the start time.
     pub fn new(id: i64, root_path: impl Into<String>) -> Self {
         Self {
             id,
@@ -43,14 +44,14 @@ impl ScanMeta {
             started_at: Utc::now(),
             completed_at: None,
             total_files: 0,
-            total_folders: 0,
+            total_dirs: 0,
             total_size: 0,
             is_complete: false,
-            error: None,
+            label: None,
         }
     }
 
-    /// Marks the scan as complete at the current time.
+    /// Marks the scan as complete, recording the current UTC time.
     pub fn mark_complete(&mut self) {
         self.completed_at = Some(Utc::now());
         self.is_complete = true;
@@ -58,8 +59,9 @@ impl ScanMeta {
 
     /// Returns the duration of the scan in seconds, if it has completed.
     pub fn duration_secs(&self) -> Option<i64> {
-        self.completed_at
-            .map(|end| (end - self.started_at).num_seconds())
+        self.completed_at.map(|end| {
+            (end - self.started_at).num_seconds()
+        })
     }
 }
 
@@ -74,11 +76,13 @@ mod tests {
         assert_eq!(meta.root_path, "/home/user");
         assert!(!meta.is_complete);
         assert!(meta.completed_at.is_none());
+        assert_eq!(meta.total_files, 0);
     }
 
     #[test]
     fn test_mark_complete() {
-        let mut meta = ScanMeta::new(1, "/home/user");
+        let mut meta = ScanMeta::new(1, "/");
+        assert!(!meta.is_complete);
         meta.mark_complete();
         assert!(meta.is_complete);
         assert!(meta.completed_at.is_some());
@@ -86,9 +90,16 @@ mod tests {
 
     #[test]
     fn test_serialization_roundtrip() {
-        let meta = ScanMeta::new(7, "/tmp");
+        let mut meta = ScanMeta::new(2, "/data");
+        meta.total_files = 1000;
+        meta.total_size = 1_048_576;
+        meta.mark_complete();
+
         let json = serde_json::to_string(&meta).expect("serialization failed");
         let restored: ScanMeta = serde_json::from_str(&json).expect("deserialization failed");
-        assert_eq!(meta, restored);
+        assert_eq!(meta.id, restored.id);
+        assert_eq!(meta.root_path, restored.root_path);
+        assert_eq!(meta.is_complete, restored.is_complete);
+        assert_eq!(meta.total_files, restored.total_files);
     }
 }

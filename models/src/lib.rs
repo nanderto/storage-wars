@@ -1,8 +1,9 @@
 //! Core data model types for the disk analyzer desktop application.
 //!
 //! This crate provides the fundamental data structures used across the
-//! application for representing filesystem nodes, database records,
-//! scan metadata, drive information, UI state, and scan messaging.
+//! application, including filesystem tree nodes, database representations,
+//! scan metadata, drive information, UI state wrappers, size change
+//! classifications, and scan messaging enums.
 
 pub mod db_node;
 pub mod drive_info;
