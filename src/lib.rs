@@ -1,19 +1,12 @@
-//! Database component — SQLite persistence layer using rusqlite.
+//! Database component – SQLite persistence layer.
 //!
-//! # Schema
-//! - `scans`  — one row per completed scan (metadata)
-//! - `nodes`  — one row per file-system node belonging to a scan
-//!
-//! Foreign key CASCADE ensures that deleting a scan removes all its nodes.
-//! Indexes on `nodes(scan_id)` and `nodes(path)` keep queries fast.
-//!
-//! # Public API
-//! - [`open_db`]              — open (or create + migrate) the on-disk database
-//! - [`open_in_memory`]       — open a fresh in-memory database (testing)
-//! - [`save_scan`]            — bulk-insert a scan tree in a single transaction
-//! - [`load_scan_tree`]       — return a flat `Vec<DbNode>` for a given scan
-//! - [`get_scans_for_drive`]  — return ordered `Vec<ScanMeta>` for a drive root
-//! - [`delete_scan`]          — CASCADE-delete a scan and all its nodes
+//! Provides:
+//! - [`open_db`]          – open (or create + migrate) the production database
+//! - [`open_in_memory`]   – open an in-memory database for testing
+//! - [`save_scan`]        – depth-first bulk insert of a scan tree in a transaction
+//! - [`load_scan_tree`]   – load a flat list of [`DbNode`]s for a given scan
+//! - [`get_scans_for_drive`] – ordered list of [`ScanMeta`] for a drive root
+//! - [`delete_scan`]      – CASCADE-delete a scan and all its nodes
 
 pub mod db;
 pub mod error;
