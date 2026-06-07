@@ -1,4 +1,4 @@
-/// Metadata about a scan session.
+/// Metadata for a single scan session.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ScanMeta {
     pub id: i64,
@@ -31,9 +31,10 @@ pub struct DbNode {
     pub path: String,
     pub size: u64,
     pub is_dir: bool,
+    pub modified: String,
 }
 
-/// Information about a drive/volume.
+/// Information about a drive / volume.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DriveInfo {
     pub name: String,
@@ -66,3 +67,5 @@ pub enum ScanMessage {
     ScanError { path: String, error: String },
     Complete { total_size: u64 },
 }
+
+Now make sure the workspace knows about this crate. If there is a top-level `Cargo.toml` workspace, it needs to include `crates/models` as a member. Based on the project structure, here's the workspace file (if one already exists, only the `members` list matters — I'm providing a minimal workspace definition):
