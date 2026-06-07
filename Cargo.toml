@@ -1,2 +1,5 @@
-@@ workspace members section
-+    "crates/utils",
+[workspace]
+members = [
+    "crates/utils",
+]
+resolver = "2"
