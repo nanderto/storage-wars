@@ -1,39 +1,30 @@
-//! [`DriveSelector`] — a focusable drive-selection widget.
+//! [`DriveSelector`] — a focusable drop-down widget for choosing a drive.
 
-use gpui::{
-    div, px, AnyElement, App, AppContext, Context, Element, Entity, EventEmitter, FocusHandle,
-    Focusable, InteractiveElement, IntoElement, ParentElement, Render, SharedString, Styled,
-    Window,
-};
+use gpui::*;
 
 use crate::theme;
-use crate::types::DriveInfo;
-
-// ---------------------------------------------------------------------------
-// Events
-// ---------------------------------------------------------------------------
-
-pub enum DriveSelectorEvent {
-    /// Emitted when the user selects a drive.
-    DriveSelected(DriveInfo),
-}
-
-impl EventEmitter<DriveSelectorEvent> for DriveSelector {}
+use crate::types::Drive;
 
 // ---------------------------------------------------------------------------
 // Model
 // ---------------------------------------------------------------------------
 
-/// A focusable drop-down–style widget that lists available drives.
+/// Actions emitted by [`DriveSelector`].
+#[derive(Debug, Clone)]
+pub struct DriveSelected(pub Drive);
+
+impl EventEmitter<DriveSelected> for DriveSelector {}
+
+/// A focusable drive-selection widget.
 pub struct DriveSelector {
-    drives: Vec<DriveInfo>,
+    drives: Vec<Drive>,
     selected_index: Option<usize>,
     is_open: bool,
     focus_handle: FocusHandle,
 }
 
 impl DriveSelector {
-    pub fn new(cx: &mut Context<Self>) -> Self {
+    pub fn new(cx: &mut ViewContext<Self>) -> Self {
         Self {
             drives: Vec::new(),
             selected_index: None,
@@ -42,32 +33,33 @@ impl DriveSelector {
         }
     }
 
-    /// Replace the drive list and reset selection.
-    pub fn set_drives(&mut self, drives: Vec<DriveInfo>) {
+    /// Replace the drive list (e.g. after a refresh).
+    pub fn set_drives(&mut self, drives: Vec<Drive>, cx: &mut ViewContext<Self>) {
         self.drives = drives;
-        self.selected_index = None;
-        self.is_open = false;
+        self.selected_index = if self.drives.is_empty() { None } else { Some(0) };
+        cx.notify();
     }
 
-    /// Returns the currently selected drive, if any.
-    pub fn selected_drive(&self) -> Option<&DriveInfo> {
+    /// Currently selected drive, if any.
+    pub fn selected_drive(&self) -> Option<&Drive> {
         self.selected_index.and_then(|i| self.drives.get(i))
     }
 
-    fn toggle_open(&mut self) {
+    fn toggle_open(&mut self, cx: &mut ViewContext<Self>) {
         self.is_open = !self.is_open;
+        cx.notify();
     }
 
-    fn select_index(&mut self, index: usize, cx: &mut Context<Self>) {
-        if index < self.drives.len() {
-            self.selected_index = Some(index);
-            self.is_open = false;
-            let drive = self.drives[index].clone();
-            cx.emit(DriveSelectorEvent::DriveSelected(drive));
+    fn select_index(&mut self, index: usize, cx: &mut ViewContext<Self>) {
+        self.selected_index = Some(index);
+        self.is_open = false;
+        if let Some(drive) = self.drives.get(index).cloned() {
+            cx.emit(DriveSelected(drive));
         }
+        cx.notify();
     }
 
-    fn render_trigger(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_trigger(&self, cx: &mut ViewContext<Self>) -> impl IntoElement {
         let label: SharedString = self
             .selected_drive()
             .map(|d| d.display_label())
@@ -82,37 +74,32 @@ impl DriveSelector {
             .flex_row()
             .items_center()
             .justify_between()
-            .px(px(theme::SPACING_SM))
-            .py(px(theme::SPACING_XS))
-            .bg(theme::SURFACE)
-            .border_1()
-            .border_color(if is_open { theme::ACCENT } else { theme::BORDER })
+            .w_full()
+            .h(px(32.0))
+            .px(px(10.0))
             .rounded(px(4.0))
+            .bg(theme::bg_secondary())
+            .border_1()
+            .border_color(theme::border())
             .cursor_pointer()
-            .on_click(cx.listener(|this, _ev, _window, cx| {
-                this.toggle_open();
-                cx.notify();
-            }))
+            .on_click(cx.listener(|this, _ev, cx| this.toggle_open(cx)))
             .child(
                 div()
-                    .text_color(theme::TEXT_PRIMARY)
-                    .text_size(px(theme::FONT_SIZE_MD))
+                    .text_color(theme::text_primary())
+                    .text_sm()
+                    .overflow_hidden()
                     .child(label),
             )
             .child(
                 div()
-                    .text_color(theme::TEXT_SECONDARY)
-                    .text_size(px(theme::FONT_SIZE_SM))
+                    .text_color(theme::text_secondary())
+                    .text_sm()
                     .child(if is_open { "▲" } else { "▼" }),
             )
     }
 
-    fn render_dropdown(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
-        if !self.is_open {
-            return None;
-        }
-
-        let items: Vec<AnyElement> = self
+    fn render_dropdown(&self, cx: &mut ViewContext<Self>) -> impl IntoElement {
+        let items: Vec<_> = self
             .drives
             .iter()
             .enumerate()
@@ -121,43 +108,42 @@ impl DriveSelector {
                 let is_selected = self.selected_index == Some(i);
 
                 div()
-                    .id(("drive-option", i))
-                    .px(px(theme::SPACING_SM))
-                    .py(px(theme::SPACING_XS))
-                    .bg(if is_selected {
-                        theme::HISTORY_ITEM_SELECTED
-                    } else {
-                        theme::SURFACE
-                    })
-                    .hover(|s| s.bg(theme::HISTORY_ITEM_HOVER))
+                    .id(ElementId::Name(format!("drive-option-{i}").into()))
+                    .flex()
+                    .items_center()
+                    .w_full()
+                    .h(px(30.0))
+                    .px(px(10.0))
                     .cursor_pointer()
-                    .text_color(theme::TEXT_PRIMARY)
-                    .text_size(px(theme::FONT_SIZE_MD))
-                    .on_click(cx.listener(move |this, _ev, _window, cx| {
-                        this.select_index(i, cx);
-                        cx.notify();
-                    }))
-                    .child(label)
-                    .into_any_element()
+                    .bg(if is_selected {
+                        theme::bg_selected()
+                    } else {
+                        theme::bg_secondary()
+                    })
+                    .hover(|s| s.bg(theme::bg_hover()))
+                    .on_click(cx.listener(move |this, _ev, cx| this.select_index(i, cx)))
+                    .child(
+                        div()
+                            .text_color(theme::text_primary())
+                            .text_sm()
+                            .child(label),
+                    )
             })
             .collect();
 
-        Some(
-            div()
-                .absolute()
-                .top(px(32.0))
-                .left(px(0.0))
-                .right(px(0.0))
-                .z_index(100)
-                .bg(theme::SURFACE)
-                .border_1()
-                .border_color(theme::BORDER)
-                .rounded(px(4.0))
-                .shadow_lg()
-                .overflow_y_scroll()
-                .max_h(px(240.0))
-                .children(items),
-        )
+        div()
+            .absolute()
+            .top(px(34.0))
+            .left(px(0.0))
+            .w_full()
+            .z_index(50)
+            .rounded(px(4.0))
+            .border_1()
+            .border_color(theme::border())
+            .bg(theme::bg_secondary())
+            .shadow_lg()
+            .overflow_hidden()
+            .children(items)
     }
 }
 
@@ -176,20 +162,15 @@ impl Focusable for DriveSelector {
 // ---------------------------------------------------------------------------
 
 impl Render for DriveSelector {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let trigger = self.render_trigger(cx);
-        let dropdown = self.render_dropdown(cx);
+    fn render(&mut self, cx: &mut ViewContext<Self>) -> impl IntoElement {
+        let is_open = self.is_open;
 
-        let mut container = div()
+        div()
+            .id("drive-selector")
             .relative()
             .w_full()
             .track_focus(&self.focus_handle)
-            .child(trigger);
-
-        if let Some(dd) = dropdown {
-            container = container.child(dd);
-        }
-
-        container
+            .child(self.render_trigger(cx))
+            .when(is_open, |el| el.child(self.render_dropdown(cx)))
     }
 }

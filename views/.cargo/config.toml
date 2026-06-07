@@ -1,10 +1,11 @@
 [build]
-# Use the system linker for faster incremental builds on macOS
-[target.x86_64-apple-darwin]
+# Use the faster linker on supported platforms.
+[target.x86_64-unknown-linux-gnu]
+linker = "clang"
 rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "link-arg=-fuse-ld=/usr/local/bin/zld"]
 
 [target.aarch64-apple-darwin]
 rustflags = []
-
-[target.x86_64-unknown-linux-gnu]
-rustflags = ["-C", "link-arg=-fuse-ld=mold"]

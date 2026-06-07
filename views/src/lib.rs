@@ -2,15 +2,15 @@
 //!
 //! # Components
 //!
-//! - [`AppView`] — root orchestrator: drive selection, scanning, tree rendering,
+//! - [`AppView`] — Root orchestrator: drive selection, scanning, tree rendering,
 //!   scan history, drive info panel, and custom title bar with window controls.
-//! - [`DriveSelector`] — `Select`-style widget implementing `Focusable`, formats
-//!   drive labels with optional volume label and available space.
-//! - [`TreeView`] — hierarchical file list with columns (Name, % Parent, Size,
-//!   Prev Size, % Prev, Files, Folders, Modified), chevrons, icons, 16 px/depth
-//!   indentation, and progress bars coloured by `SizeChange`.
-//! - [`ScanHistory`] — 280 px-wide focusable panel listing scans with Base/New
-//!   selection, Compare and Delete actions.
+//! - [`DriveSelector`] — A `Select`-style widget implementing `Focusable`,
+//!   formats drive labels with optional volume label and available space.
+//! - [`TreeView`] — Hierarchical file list with columns (Name, % Parent, Size,
+//!   Prev Size, % Prev, Files, Folders, Modified), chevrons, icons, indentation
+//!   at 16 px per depth level, and progress bars with `SizeChange` colours.
+//! - [`ScanHistory`] — 280 px-wide focusable panel showing scan list with
+//!   Base/New selection, Compare and Delete buttons.
 
 pub mod app_view;
 pub mod drive_selector;

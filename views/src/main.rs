@@ -1,7 +1,7 @@
 //! Entry point for the views desktop application.
 
 use anyhow::Result;
-use gpui::{App, AppContext, Application, WindowOptions};
+use gpui::*;
 use log::info;
 
 fn main() -> Result<()> {
@@ -9,22 +9,23 @@ fn main() -> Result<()> {
 
     info!("Starting views application");
 
-    let app = Application::new();
+    App::new().run(|cx: &mut AppContext| {
+        let bounds = Bounds::centered(None, size(px(1280.0), px(800.0)), cx);
 
-    app.run(|cx: &mut AppContext| {
-        let options = WindowOptions {
-            titlebar: None,
-            window_min_size: Some(gpui::Size {
-                width: gpui::px(800.0),
-                height: gpui::px(600.0),
-            }),
-            ..Default::default()
-        };
-
-        cx.open_window(options, |cx| {
-            cx.new(|_cx| views::AppView::new())
-        })
-        .expect("failed to open window");
+        cx.open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(bounds)),
+                titlebar: Some(TitlebarOptions {
+                    title: Some(SharedString::from("Disk Space Analyzer")),
+                    appears_transparent: true,
+                    traffic_light_position: None,
+                }),
+                window_decorations: Some(WindowDecorations::Client),
+                ..Default::default()
+            },
+            |cx| cx.new_view(|cx| views::AppView::new(cx)),
+        )
+        .expect("Failed to open window");
     });
 
     Ok(())
