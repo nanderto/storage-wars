@@ -1,312 +1,295 @@
-//! [`ScanHistory`] — 280 px-wide focusable panel for managing scan records.
+//! Scan history panel – 280px wide, focusable, with Base/New selection,
+//! Compare and Delete buttons.
 
-use gpui::*;
+use gpui::{
+    div, px, Context, FocusHandle, Focusable, IntoElement, ParentElement, Render, Styled,
+    ViewContext,
+};
 
-use crate::theme::{self, HISTORY_PANEL_WIDTH_PX};
-use crate::types::{ScanRecord, SelectionRole};
+use crate::theme::{Palette, SCAN_HISTORY_WIDTH_PX};
 
-// ---------------------------------------------------------------------------
-// Events
-// ---------------------------------------------------------------------------
-
+/// Represents a single scan entry in the history list.
 #[derive(Debug, Clone)]
-pub enum ScanHistoryEvent {
-    Compare { base_id: uuid::Uuid, new_id: uuid::Uuid },
-    Delete(uuid::Uuid),
-    SelectionChanged,
+pub struct ScanEntry {
+    pub id: u64,
+    pub label: String,
+    pub timestamp: String,
+    pub total_bytes: u64,
 }
 
-impl EventEmitter<ScanHistoryEvent> for ScanHistory {}
+/// Role assigned to a scan entry for comparison.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScanRole {
+    Base,
+    New,
+}
 
-// ---------------------------------------------------------------------------
-// Model
-// ---------------------------------------------------------------------------
-
-/// A 280 px-wide panel listing historical scans with Base/New selection,
-/// Compare, and Delete actions.
+/// 280px-wide focusable scan history panel.
 pub struct ScanHistory {
-    records: Vec<ScanRecord>,
-    base_id: Option<uuid::Uuid>,
-    new_id: Option<uuid::Uuid>,
     focus_handle: FocusHandle,
+    scans: Vec<ScanEntry>,
+    base_id: Option<u64>,
+    new_id: Option<u64>,
 }
 
 impl ScanHistory {
     pub fn new(cx: &mut ViewContext<Self>) -> Self {
         Self {
-            records: Vec::new(),
+            focus_handle: cx.focus_handle(),
+            scans: Vec::new(),
             base_id: None,
             new_id: None,
-            focus_handle: cx.focus_handle(),
         }
     }
 
-    /// Replace the scan records list.
-    pub fn set_records(&mut self, records: Vec<ScanRecord>, cx: &mut ViewContext<Self>) {
-        self.records = records;
+    /// Replaces the scan list.
+    pub fn set_scans(&mut self, scans: Vec<ScanEntry>, cx: &mut ViewContext<Self>) {
+        self.scans = scans;
         cx.notify();
     }
 
-    fn set_role(&mut self, id: uuid::Uuid, role: SelectionRole, cx: &mut ViewContext<Self>) {
+    /// Assigns a role to a scan entry.
+    pub fn assign_role(&mut self, id: u64, role: ScanRole, cx: &mut ViewContext<Self>) {
         match role {
-            SelectionRole::Base => {
-                self.base_id = Some(id);
-                // Prevent same record being both base and new.
-                if self.new_id == Some(id) {
-                    self.new_id = None;
-                }
-            }
-            SelectionRole::New => {
-                self.new_id = Some(id);
-                if self.base_id == Some(id) {
-                    self.base_id = None;
-                }
-            }
-            SelectionRole::None => {}
+            ScanRole::Base => self.base_id = Some(id),
+            ScanRole::New => self.new_id = Some(id),
         }
-        cx.emit(ScanHistoryEvent::SelectionChanged);
         cx.notify();
     }
 
-    fn compare(&mut self, cx: &mut ViewContext<Self>) {
-        if let (Some(base), Some(new)) = (self.base_id, self.new_id) {
-            cx.emit(ScanHistoryEvent::Compare { base_id: base, new_id: new });
-        }
+    fn on_compare(&mut self, cx: &mut ViewContext<Self>) {
+        log::info!(
+            "Compare requested: base={:?} new={:?}",
+            self.base_id,
+            self.new_id
+        );
+        cx.notify();
     }
 
-    fn delete(&mut self, id: uuid::Uuid, cx: &mut ViewContext<Self>) {
-        self.records.retain(|r| r.id != id);
-        if self.base_id == Some(id) {
-            self.base_id = None;
-        }
-        if self.new_id == Some(id) {
+    fn on_delete(&mut self, cx: &mut ViewContext<Self>) {
+        // Delete whichever scan is selected as "new", if any.
+        if let Some(new_id) = self.new_id {
+            self.scans.retain(|s| s.id != new_id);
             self.new_id = None;
+            log::info!("Deleted scan id={}", new_id);
         }
-        cx.emit(ScanHistoryEvent::Delete(id));
         cx.notify();
     }
 
-    fn can_compare(&self) -> bool {
-        self.base_id.is_some() && self.new_id.is_some()
+    fn assign_base(&mut self, id: u64, cx: &mut ViewContext<Self>) {
+        self.assign_role(id, ScanRole::Base, cx);
     }
 
-    // -----------------------------------------------------------------------
-    // Rendering helpers
-    // -----------------------------------------------------------------------
-
-    fn render_record(&self, record: &ScanRecord, cx: &mut ViewContext<Self>) -> impl IntoElement {
-        let id = record.id;
-        let is_base = self.base_id == Some(id);
-        let is_new = self.new_id == Some(id);
-
-        let label: SharedString = record.label.clone().into();
-        let date_str: SharedString = record.scanned_at.format("%Y-%m-%d %H:%M").to_string().into();
-        let size_str: SharedString = bytesize::ByteSize(record.total_bytes).to_string().into();
-
-        div()
-            .id(ElementId::Name(format!("history-row-{id}").into()))
-            .flex()
-            .flex_col()
-            .w_full()
-            .px(px(8.0))
-            .py(px(6.0))
-            .border_b_1()
-            .border_color(theme::border())
-            .bg(theme::bg_primary())
-            .hover(|s| s.bg(theme::bg_hover()))
-            // --- Label + size ---
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .justify_between()
-                    .items_center()
-                    .child(
-                        div()
-                            .text_color(theme::text_primary())
-                            .text_sm()
-                            .font_weight(FontWeight::MEDIUM)
-                            .child(label),
-                    )
-                    .child(
-                        div()
-                            .text_color(theme::text_secondary())
-                            .text_xs()
-                            .child(size_str),
-                    ),
-            )
-            // --- Date ---
-            .child(
-                div()
-                    .text_color(theme::text_secondary())
-                    .text_xs()
-                    .child(date_str),
-            )
-            // --- Base / New / Delete buttons ---
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .gap(px(4.0))
-                    .mt(px(4.0))
-                    // Base button
-                    .child(
-                        div()
-                            .id(ElementId::Name(format!("base-btn-{id}").into()))
-                            .px(px(6.0))
-                            .py(px(2.0))
-                            .rounded(px(3.0))
-                            .text_xs()
-                            .cursor_pointer()
-                            .bg(if is_base {
-                                theme::accent()
-                            } else {
-                                theme::bg_secondary()
-                            })
-                            .text_color(if is_base {
-                                theme::bg_primary()
-                            } else {
-                                theme::text_secondary()
-                            })
-                            .hover(|s| s.bg(theme::bg_hover()))
-                            .on_click(cx.listener(move |this, _ev, cx| {
-                                this.set_role(id, SelectionRole::Base, cx)
-                            }))
-                            .child("Base"),
-                    )
-                    // New button
-                    .child(
-                        div()
-                            .id(ElementId::Name(format!("new-btn-{id}").into()))
-                            .px(px(6.0))
-                            .py(px(2.0))
-                            .rounded(px(3.0))
-                            .text_xs()
-                            .cursor_pointer()
-                            .bg(if is_new {
-                                theme::accent()
-                            } else {
-                                theme::bg_secondary()
-                            })
-                            .text_color(if is_new {
-                                theme::bg_primary()
-                            } else {
-                                theme::text_secondary()
-                            })
-                            .hover(|s| s.bg(theme::bg_hover()))
-                            .on_click(cx.listener(move |this, _ev, cx| {
-                                this.set_role(id, SelectionRole::New, cx)
-                            }))
-                            .child("New"),
-                    )
-                    // Spacer
-                    .child(div().flex_grow())
-                    // Delete button
-                    .child(
-                        div()
-                            .id(ElementId::Name(format!("del-btn-{id}").into()))
-                            .px(px(6.0))
-                            .py(px(2.0))
-                            .rounded(px(3.0))
-                            .text_xs()
-                            .cursor_pointer()
-                            .bg(theme::bg_secondary())
-                            .text_color(theme::destructive())
-                            .hover(|s| s.bg(theme::bg_hover()))
-                            .on_click(cx.listener(move |this, _ev, cx| this.delete(id, cx)))
-                            .child("Delete"),
-                    ),
-            )
-    }
-
-    fn render_compare_button(&self, cx: &mut ViewContext<Self>) -> impl IntoElement {
-        let enabled = self.can_compare();
-
-        div()
-            .id("compare-btn")
-            .w_full()
-            .h(px(36.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_pointer()
-            .bg(if enabled {
-                theme::accent()
-            } else {
-                theme::bg_secondary()
-            })
-            .text_color(if enabled {
-                theme::bg_primary()
-            } else {
-                theme::text_secondary()
-            })
-            .text_sm()
-            .font_weight(FontWeight::SEMIBOLD)
-            .rounded(px(4.0))
-            .mx(px(8.0))
-            .mb(px(8.0))
-            .when(enabled, |el| {
-                el.on_click(cx.listener(|this, _ev, cx| this.compare(cx)))
-            })
-            .child("Compare")
+    fn assign_new(&mut self, id: u64, cx: &mut ViewContext<Self>) {
+        self.assign_role(id, ScanRole::New, cx);
     }
 }
 
-// ---------------------------------------------------------------------------
-// Focusable
-// ---------------------------------------------------------------------------
-
 impl Focusable for ScanHistory {
-    fn focus_handle(&self, _cx: &AppContext) -> FocusHandle {
+    fn focus_handle(&self, _cx: &gpui::AppContext) -> FocusHandle {
         self.focus_handle.clone()
     }
 }
 
-// ---------------------------------------------------------------------------
-// Render
-// ---------------------------------------------------------------------------
-
 impl Render for ScanHistory {
     fn render(&mut self, cx: &mut ViewContext<Self>) -> impl IntoElement {
-        let records = self.records.clone();
+        let rows: Vec<_> = self
+            .scans
+            .iter()
+            .map(|scan| {
+                let scan_id = scan.id;
+                let is_base = self.base_id == Some(scan_id);
+                let is_new = self.new_id == Some(scan_id);
+
+                div()
+                    .flex()
+                    .flex_col()
+                    .w_full()
+                    .px(px(8.0))
+                    .py(px(6.0))
+                    .border_b_1()
+                    .border_color(Palette::border())
+                    .bg(if is_base || is_new {
+                        Palette::selection()
+                    } else {
+                        Palette::background()
+                    })
+                    .hover(|s| s.bg(Palette::surface()))
+                    // ── Scan label & timestamp ──────────────────────────
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .text_color(Palette::text_primary())
+                                    .text_sm()
+                                    .child(scan.label.clone()),
+                            )
+                            .child(
+                                div()
+                                    .text_color(Palette::text_muted())
+                                    .text_xs()
+                                    .child(scan.timestamp.clone()),
+                            ),
+                    )
+                    // ── Base / New role buttons ─────────────────────────
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .gap(px(4.0))
+                            .mt(px(4.0))
+                            .child(
+                                div()
+                                    .px(px(6.0))
+                                    .py(px(2.0))
+                                    .rounded(px(3.0))
+                                    .bg(if is_base {
+                                        Palette::accent()
+                                    } else {
+                                        Palette::surface_elevated()
+                                    })
+                                    .border_1()
+                                    .border_color(Palette::border())
+                                    .cursor_pointer()
+                                    .on_mouse_down(
+                                        gpui::MouseButton::Left,
+                                        cx.listener(move |this, _, cx| {
+                                            this.assign_base(scan_id, cx);
+                                        }),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_color(if is_base {
+                                                Palette::background()
+                                            } else {
+                                                Palette::text_secondary()
+                                            })
+                                            .text_xs()
+                                            .child("Base"),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .px(px(6.0))
+                                    .py(px(2.0))
+                                    .rounded(px(3.0))
+                                    .bg(if is_new {
+                                        Palette::accent()
+                                    } else {
+                                        Palette::surface_elevated()
+                                    })
+                                    .border_1()
+                                    .border_color(Palette::border())
+                                    .cursor_pointer()
+                                    .on_mouse_down(
+                                        gpui::MouseButton::Left,
+                                        cx.listener(move |this, _, cx| {
+                                            this.assign_new(scan_id, cx);
+                                        }),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_color(if is_new {
+                                                Palette::background()
+                                            } else {
+                                                Palette::text_secondary()
+                                            })
+                                            .text_xs()
+                                            .child("New"),
+                                    ),
+                            ),
+                    )
+            })
+            .collect();
 
         div()
-            .id("scan-history")
             .flex()
             .flex_col()
-            .w(px(HISTORY_PANEL_WIDTH_PX))
+            .w(px(SCAN_HISTORY_WIDTH_PX))
             .h_full()
-            .bg(theme::bg_secondary())
-            .border_r_1()
-            .border_color(theme::border())
-            .track_focus(&self.focus_handle)
-            // Header
+            .bg(Palette::surface())
+            // ── Panel header ────────────────────────────────────────────
             .child(
                 div()
                     .flex()
                     .items_center()
+                    .w_full()
                     .h(px(36.0))
                     .px(px(10.0))
                     .border_b_1()
-                    .border_color(theme::border())
+                    .border_color(Palette::border())
                     .child(
                         div()
-                            .text_color(theme::text_primary())
+                            .text_color(Palette::text_primary())
                             .text_sm()
-                            .font_weight(FontWeight::SEMIBOLD)
                             .child("Scan History"),
                     ),
             )
-            // Record list
+            // ── Scan list ───────────────────────────────────────────────
             .child(
                 div()
                     .flex()
                     .flex_col()
-                    .flex_grow()
+                    .flex_1()
                     .overflow_y_scroll()
-                    .children(records.iter().map(|r| self.render_record(r, cx))),
+                    .children(rows),
             )
-            // Compare button pinned to bottom
-            .child(self.render_compare_button(cx))
+            // ── Action buttons ──────────────────────────────────────────
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .gap(px(8.0))
+                    .p(px(8.0))
+                    .border_t_1()
+                    .border_color(Palette::border())
+                    .child(
+                        div()
+                            .flex_1()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .h(px(30.0))
+                            .bg(Palette::accent())
+                            .hover(|s| s.bg(Palette::accent_hover()))
+                            .rounded(px(4.0))
+                            .cursor_pointer()
+                            .on_mouse_down(gpui::MouseButton::Left, cx.listener(|this, _, cx| {
+                                this.on_compare(cx);
+                            }))
+                            .child(
+                                div()
+                                    .text_color(Palette::background())
+                                    .text_sm()
+                                    .child("Compare"),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .h(px(30.0))
+                            .bg(Palette::surface_elevated())
+                            .hover(|s| s.bg(Palette::surface()))
+                            .border_1()
+                            .border_color(Palette::border())
+                            .rounded(px(4.0))
+                            .cursor_pointer()
+                            .on_mouse_down(gpui::MouseButton::Left, cx.listener(|this, _, cx| {
+                                this.on_delete(cx);
+                            }))
+                            .child(
+                                div()
+                                    .text_color(Palette::text_secondary())
+                                    .text_sm()
+                                    .child("Delete"),
+                            ),
+                    ),
+            )
     }
 }
