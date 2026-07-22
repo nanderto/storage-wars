@@ -157,7 +157,7 @@
 - [x] `cargo clippy -- -D warnings` — clean
 - [x] `cargo test` — all 68 tests pass (12 new: 9 scanner + 3 app_view)
 - [ ] `cargo run` — manual verification
-- [ ] Commit, push, open PR
+- [x] Commit, push, open PR
 
 ### 7e. Scan Loop Optimization
 - [x] Remove mid-scan `recalculate_sizes` and `rebuild_tree` (sizes meaningless until scan completes)
@@ -166,3 +166,30 @@
 - [x] Keep 1ms timer yield between batches for UI responsiveness
 - [x] `cargo check` + `cargo clippy -- -D warnings` — clean
 - [x] `cargo test` — all 68 tests pass
+
+### 7f. Fix % of Parent + Mid-scan Visibility + Sort + Bar Widths
+- [x] Add `pct_of_parent: f32` field to `UiNode` (actual % of parent total, separate from bar-width fraction)
+- [x] Compute `pct_of_parent` in `flatten_tree`/`flatten_node` alongside `scan_progress`
+- [x] Display `pct_of_parent` in tree_view instead of `scan_progress * 100`
+- [x] Re-enable mid-scan `recalculate_sizes` + `rebuild_tree` at 2fps (500ms) so users see data accumulating
+- [x] Update tests (scanner + tree_view) for new field
+- [x] Sort children by size descending (largest first) in `flatten_node`
+- [x] Change bar width to use `pct_of_parent / 100.0` instead of fraction-of-largest-sibling
+- [x] Remove redundant `scan_progress` field from `UiNode`
+- [x] `cargo check` + `cargo clippy -- -D warnings` — clean
+- [x] `cargo test` — all 71 tests pass
+
+### 7g. DirectoryScanner Actor Integration
+- [x] Wire `Entity<DirectoryScanner>` into `AppView` struct + constructor
+- [x] Subscribe to `ScannerEvent::Progress` and `ScannerEvent::Complete`
+- [x] Replace 190-line inline `start_scan()` async loop with actor delegation (~35 lines)
+- [x] Add `on_scan_progress()` handler — uses `scanner.flatten_visible()` (O(visible) vs O(entire_tree))
+- [x] Add `on_scan_complete()` handler — takes tree, saves to DB, rebuilds full tree
+- [x] Update `on_toggle_expand()` to use `flatten_visible()` during scan
+- [x] Remove obsolete fields: `scan_cancel`, `dirs_scanned`, `last_scan_notify`
+- [x] Remove dead imports: `AtomicBool`, `Ordering`, `Arc`, `AsyncApp`, `WeakEntity`
+- [x] Add 6 DirectoryScanner tests (flatten_visible: empty/collapsed/expanded/nested + take_tree)
+- [x] `cargo clippy -- -D warnings` — clean
+- [x] `cargo test` — all 77 tests pass (6 new)
+- [ ] `cargo run` — manual verification
+- [ ] Commit, push, open PR

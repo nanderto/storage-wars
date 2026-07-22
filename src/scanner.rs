@@ -300,18 +300,34 @@ pub fn recalculate_sizes(node: &mut FsNode) {
         .sum();
 }
 
+/// Build a tree from a flat map of parent_path → children.
+/// Recursively attaches children from the map. O(n) total.
+pub fn assemble_tree(root: &mut FsNode, children_map: &mut HashMap<PathBuf, Vec<FsNode>>) {
+    if let Some(children) = children_map.remove(&root.path) {
+        root.children = children;
+        for child in &mut root.children {
+            if child.is_dir {
+                assemble_tree(child, children_map);
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tree flattening — turns the nested FsNode tree into a flat list for the UI
 // ---------------------------------------------------------------------------
 
 /// Flatten `roots` into a `Vec<UiNode>` for rendering.
 /// Only expands nodes whose path is in `expanded_paths`.
-/// `scan_progress` for each node is its fraction of the largest sibling's size.
+/// Children are sorted by size descending (largest first).
+/// `pct_of_parent` is the actual percentage of the parent's total size.
 pub fn flatten_tree(roots: &[FsNode], expanded_paths: &HashSet<PathBuf>) -> Vec<UiNode> {
-    let max_size = roots.iter().map(|n| n.current_size).max().unwrap_or(0);
+    let parent_total: u64 = roots.iter().map(|n| n.current_size).sum();
+    let mut sorted: Vec<&FsNode> = roots.iter().collect();
+    sorted.sort_by(|a, b| b.current_size.cmp(&a.current_size));
     let mut out = Vec::new();
-    for node in roots {
-        flatten_node(node, 0, max_size, expanded_paths, &mut out);
+    for node in sorted {
+        flatten_node(node, 0, parent_total, expanded_paths, &mut out);
     }
     out
 }
@@ -319,14 +335,14 @@ pub fn flatten_tree(roots: &[FsNode], expanded_paths: &HashSet<PathBuf>) -> Vec<
 fn flatten_node(
     node: &FsNode,
     depth: usize,
-    parent_max_size: u64,
+    parent_total: u64,
     expanded_paths: &HashSet<PathBuf>,
     out: &mut Vec<UiNode>,
 ) {
-    let scan_progress = if parent_max_size == 0 {
+    let pct_of_parent = if parent_total == 0 {
         0.0_f32
     } else {
-        (node.current_size as f64 / parent_max_size as f64).min(1.0) as f32
+        (node.current_size as f64 / parent_total as f64 * 100.0) as f32
     };
 
     let expanded = node.is_dir && expanded_paths.contains(&node.path);
@@ -335,13 +351,15 @@ fn flatten_node(
         fs_node: node.clone(),
         depth,
         expanded,
-        scan_progress,
+        pct_of_parent,
     });
 
     if expanded {
-        let child_max = node.children.iter().map(|c| c.current_size).max().unwrap_or(0);
-        for child in &node.children {
-            flatten_node(child, depth + 1, child_max, expanded_paths, out);
+        let child_total: u64 = node.children.iter().map(|c| c.current_size).sum();
+        let mut sorted: Vec<&FsNode> = node.children.iter().collect();
+        sorted.sort_by(|a, b| b.current_size.cmp(&a.current_size));
+        for child in sorted {
+            flatten_node(child, depth + 1, child_total, expanded_paths, out);
         }
     }
 }
@@ -512,19 +530,31 @@ mod tests {
     }
 
     #[test]
-    fn flatten_scan_progress_largest_sibling_is_one() {
+    fn flatten_pct_of_parent_correct() {
         let tree = make_tree();
         let mut expanded = HashSet::new();
         expanded.insert(PathBuf::from("/root"));
 
         let flat = flatten_tree(&tree, &expanded);
-        // docs (200) is the largest child → progress == 1.0
+        // docs=200 of parent total 200 → 100.0%
         let docs = flat.iter().find(|n| n.fs_node.name == "docs").unwrap();
-        assert!((docs.scan_progress - 1.0).abs() < f32::EPSILON);
+        assert!((docs.pct_of_parent - 100.0).abs() < 0.1);
 
-        // empty (0) → progress == 0.0
+        // empty=0 of parent total 200 → 0.0%
         let empty = flat.iter().find(|n| n.fs_node.name == "empty").unwrap();
-        assert!((empty.scan_progress).abs() < f32::EPSILON);
+        assert!((empty.pct_of_parent).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn flatten_children_sorted_by_size_descending() {
+        let tree = make_tree();
+        let mut expanded = HashSet::new();
+        expanded.insert(PathBuf::from("/root"));
+
+        let flat = flatten_tree(&tree, &expanded);
+        // Children should be sorted: docs (200) before empty (0)
+        assert_eq!(flat[1].fs_node.name, "docs");
+        assert_eq!(flat[2].fs_node.name, "empty");
     }
 
     // -----------------------------------------------------------------------
@@ -896,6 +926,61 @@ mod tests {
         assert_eq!(root.current_size, 300);
         assert_eq!(root.file_count, 2);
         assert_eq!(root.folder_count, 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // assemble_tree tests
+    // -----------------------------------------------------------------------
+
+    fn make_fsnode(name: &str, path: &str, is_dir: bool) -> FsNode {
+        FsNode {
+            name: name.into(),
+            path: PathBuf::from(path),
+            is_dir,
+            current_size: 0,
+            prev_size: None,
+            children: vec![],
+            file_count: 0,
+            folder_count: 0,
+            modified: None,
+        }
+    }
+
+    #[test]
+    fn assemble_tree_builds_nested_structure() {
+        let root_path = PathBuf::from("/root");
+        let sub_path = PathBuf::from("/root/sub");
+
+        let mut map: HashMap<PathBuf, Vec<FsNode>> = HashMap::new();
+        map.insert(
+            root_path.clone(),
+            vec![
+                make_fsnode("sub", "/root/sub", true),
+                make_fsnode("a.txt", "/root/a.txt", false),
+            ],
+        );
+        map.insert(
+            sub_path.clone(),
+            vec![make_fsnode("b.txt", "/root/sub/b.txt", false)],
+        );
+
+        let mut root = make_fsnode("root", "/root", true);
+        assemble_tree(&mut root, &mut map);
+
+        assert_eq!(root.children.len(), 2);
+        let sub = root.children.iter().find(|c| c.name == "sub").unwrap();
+        assert_eq!(sub.children.len(), 1);
+        assert_eq!(sub.children[0].name, "b.txt");
+        // Map should be consumed
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn assemble_tree_empty_map_leaves_root_childless() {
+        let mut map: HashMap<PathBuf, Vec<FsNode>> = HashMap::new();
+        let mut root = make_fsnode("root", "/root", true);
+        assemble_tree(&mut root, &mut map);
+        assert!(root.children.is_empty());
     }
 
     // -----------------------------------------------------------------------
